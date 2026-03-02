@@ -51,7 +51,7 @@ function getModelProvider(task, models) {
   return 'claude';
 }
 
-export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, models }) {
+export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
@@ -80,6 +80,9 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
     <div className={`card card-${task.status}`} onClick={() => onSelect(task)} style={{ cursor: 'pointer' }}>
       <div className="card-header">
         <span className="card-title">{task.title}</span>
+        {isQueued && queuePosition && (
+          <span className="queue-position-badge">#{queuePosition} in queue</span>
+        )}
         {(isProposed || isPlanned || isPlanning || isQueued) && (
           <button className="card-dismiss" onClick={(e) => { e.stopPropagation(); onDismiss(task.id); }} title={isPlanning ? 'Cancel' : 'Dismiss'}>
             &times;

@@ -1,6 +1,11 @@
 import Card from './Card.jsx';
 
 export default function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, models }) {
+  const executingTasks = tasks.filter(t => t.status !== 'queued');
+  const queuedTasks = tasks.filter(t => t.status === 'queued')
+    .sort((a, b) => (a.queuePosition ?? Infinity) - (b.queuePosition ?? Infinity) || (a.createdAt || 0) - (b.createdAt || 0));
+  const hasQueuedSection = queuedTasks.length > 0;
+
   return (
     <div className="column">
       <div className="column-header">
@@ -8,7 +13,7 @@ export default function Column({ title, tasks, projectMap, execStartTimes, planS
         <span className="column-count">{tasks.length}</span>
       </div>
       <div className="column-body">
-        {tasks.map((task) => (
+        {executingTasks.map((task) => (
           <Card
             key={task.id}
             task={task}
@@ -21,6 +26,28 @@ export default function Column({ title, tasks, projectMap, execStartTimes, planS
             onAbort={onAbort}
             onDequeue={onDequeue}
             onSelect={onSelectTask}
+            models={models}
+          />
+        ))}
+        {hasQueuedSection && (
+          <div className="queue-divider">
+            <span className="queue-divider-label">Queued ({queuedTasks.length})</span>
+          </div>
+        )}
+        {queuedTasks.map((task, index) => (
+          <Card
+            key={task.id}
+            task={task}
+            project={projectMap[task.projectId]}
+            execStartTime={execStartTimes[task.id]}
+            planStartTime={planStartTimes?.[task.id]}
+            onExecute={onExecute}
+            onPlan={onPlan}
+            onDismiss={onDismiss}
+            onAbort={onAbort}
+            onDequeue={onDequeue}
+            onSelect={onSelectTask}
+            queuePosition={index + 1}
             models={models}
           />
         ))}

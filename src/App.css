@@ -193,6 +193,17 @@ html, body {
   color: #fff;
 }
 
+.btn-dequeue {
+  background: rgba(149, 154, 176, 0.15);
+  color: var(--text-muted);
+  border: 1px solid rgba(149, 154, 176, 0.3);
+}
+
+.btn-dequeue:hover:not(:disabled) {
+  background: var(--text-muted);
+  color: var(--bg);
+}
+
 /* ===== Project List ===== */
 .project-list {
   display: flex;
@@ -1006,6 +1017,31 @@ html, body {
   color: var(--text-dim);
 }
 
+/* ===== Queue Divider ===== */
+.queue-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.queue-divider::before,
+.queue-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.queue-divider-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
 /* ===== Card ===== */
 .card {
   background: var(--surface);
@@ -1033,8 +1069,13 @@ html, body {
 }
 
 .card-queued {
-  border-color: #f59e0b;
-  border-left: 3px solid #f59e0b;
+  opacity: 0.55;
+  border-color: var(--border);
+  border-left: 3px solid var(--text-dim);
+}
+
+.card-queued:hover {
+  opacity: 0.75;
 }
 
 .card-executing {
@@ -1136,6 +1177,16 @@ html, body {
   padding: 2px 6px;
   border-radius: 3px;
   color: #0f1117;
+}
+
+.queue-position-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
 }
 
 .commit-hash {
