@@ -5,10 +5,12 @@ import http from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { setupWebSocket } from './ws.js';
-import projectRoutes from './routes/projects.js';
+import projectRoutes, { checkRailwayHealth } from './routes/projects.js';
 import taskRoutes from './routes/tasks.js';
 import templateRoutes from './routes/templates.js';
 import agentRoutes from './routes/agents.js';
+import * as state from './state.js';
+import { broadcast } from './ws.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distPath = join(__dirname, '..', 'dist');
@@ -83,6 +85,23 @@ app.get('*', (req, res) => {
 
 // WebSocket
 setupWebSocket(server);
+
+// Periodic Railway health checks (every 90 seconds)
+setInterval(async () => {
+  const projects = state.getProjects().filter(p => p.railwayProject);
+  for (const project of projects) {
+    try {
+      broadcast('project:railway-checking', { projectId: project.id });
+      const result = await checkRailwayHealth(project);
+      const railwayResult = { healthy: result.healthy, message: result.message, timestamp: result.timestamp };
+      state.updateProject(project.id, { lastRailwayResult: railwayResult });
+      broadcast('project:railway-status', { projectId: project.id, ...railwayResult });
+    } catch (err) {
+      const failResult = { healthy: false, message: err.message, timestamp: Date.now() };
+      broadcast('project:railway-status', { projectId: project.id, ...failResult });
+    }
+  }
+}, 90_000);
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {

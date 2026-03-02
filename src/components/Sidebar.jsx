@@ -13,6 +13,7 @@ export default function Sidebar({
   onClearSetupResult,
   onCreateFixTask,
   testStatusMap,
+  railwayStatusMap,
   onClearTestResult,
 }) {
   const [path, setPath] = useState('');
@@ -26,16 +27,17 @@ export default function Sidebar({
   const [creatingFix, setCreatingFix] = useState(false);
   const [fixCreated, setFixCreated] = useState(false);
   const [railwayInput, setRailwayInput] = useState('');
-  const [checkingRailwayMap, setCheckingRailwayMap] = useState({});
-  const [railwayResultMap, setRailwayResultMap] = useState({});
   const [confirmingProjectId, setConfirmingProjectId] = useState(null);
   const confirmTimerRef = useRef(null);
 
   const testStatus = testStatusMap[selectedProjectId];
   const testing = !!testStatus?.running;
   const testResult = testStatus?.result || null;
-  const checkingRailway = !!checkingRailwayMap[selectedProjectId];
-  const railwayResult = railwayResultMap[selectedProjectId] || null;
+  const railwayStatus = railwayStatusMap[selectedProjectId];
+  const checkingRailway = railwayStatus?.status === 'checking';
+  const railwayResult = railwayStatus && railwayStatus.status !== 'unknown' && railwayStatus.status !== 'checking'
+    ? { healthy: railwayStatus.status === 'healthy', message: railwayStatus.message, checkedAt: railwayStatus.checkedAt }
+    : null;
   const settingUp = !!setupMap[selectedProjectId];
   const setupResult = setupResultMap[selectedProjectId] || null;
   const setupProgress = setupMap[selectedProjectId] || null;
@@ -65,33 +67,6 @@ export default function Sidebar({
     api.getTestInfo(selectedProjectId).then(setTestInfo).catch(() => {});
     api.getGitStatus(selectedProjectId).then(setGitInfo).catch(() => {});
   }, [setupResult, selectedProjectId]);
-
-  // Hydrate railwayResultMap from cached project data on first load, and queue fresh checks
-  const railwayHydrated = useRef(false);
-  useEffect(() => {
-    if (railwayHydrated.current || projects.length === 0) return;
-    railwayHydrated.current = true;
-    const cached = {};
-    for (const p of projects) {
-      if (p.lastRailwayResult) {
-        cached[p.id] = { ...p.lastRailwayResult, checkedAt: p.lastRailwayResult.timestamp };
-      }
-    }
-    if (Object.keys(cached).length > 0) {
-      setRailwayResultMap(cached);
-    }
-    // Queue fresh Railway checks for configured projects (fire-and-forget)
-    for (const p of projects) {
-      if (p.railwayProject) {
-        const pid = p.id;
-        api.checkRailway(pid)
-          .then((result) => {
-            setRailwayResultMap((prev) => ({ ...prev, [pid]: { ...result, checkedAt: Date.now() } }));
-          })
-          .catch(() => {});
-      }
-    }
-  }, [projects]);
 
   useEffect(() => () => clearTimeout(confirmTimerRef.current), []);
 
@@ -156,29 +131,23 @@ export default function Sidebar({
 
   const handleCheckRailway = async () => {
     if (!selectedProjectId) return;
-    const pid = selectedProjectId;
-    setCheckingRailwayMap(prev => ({ ...prev, [pid]: true }));
     try {
-      const result = await api.checkRailway(pid);
-      setRailwayResultMap(prev => ({ ...prev, [pid]: { ...result, checkedAt: Date.now() } }));
-    } catch (err) {
-      setRailwayResultMap(prev => ({ ...prev, [pid]: { healthy: false, message: err.message, checkedAt: Date.now() } }));
-    } finally {
-      setCheckingRailwayMap(prev => { const next = { ...prev }; delete next[pid]; return next; });
-    }
+      await api.checkRailway(selectedProjectId);
+    } catch { /* errors handled via WS broadcast */ }
   };
 
   const canRunTests = testInfo && testInfo.source !== 'none';
 
   function getProjectStatusColor(projectId) {
     const ts = testStatusMap[projectId];
-    const rr = railwayResultMap[projectId];
-    const isRunning = !!ts?.running || !!checkingRailwayMap[projectId];
+    const rs = railwayStatusMap[projectId];
+    const isRunning = !!ts?.running || rs?.status === 'checking';
     if (isRunning) return 'yellow';
     if (ts?.result && !ts.result.passed) return 'red';
-    if (rr && !rr.healthy) return 'red';
+    if (rs?.status === 'failed') return 'red';
+    if (ts?.result?.passed && rs?.status === 'healthy') return 'green';
     if (ts?.result?.passed) return 'green';
-    if (rr?.healthy) return 'green';
+    if (rs?.status === 'healthy') return 'green';
     return 'gray';
   }
 
@@ -220,9 +189,12 @@ export default function Sidebar({
         {projects.map((p) => {
           const statusColor = getProjectStatusColor(p.id);
           const ts = testStatusMap[p.id];
-          const rr = railwayResultMap[p.id];
+          const rs = railwayStatusMap[p.id];
+          const rr = rs && rs.status !== 'unknown' && rs.status !== 'checking'
+            ? { healthy: rs.status === 'healthy', message: rs.message, checkedAt: rs.checkedAt }
+            : null;
           const isTestRunning = !!ts?.running;
-          const isRailwayChecking = !!checkingRailwayMap[p.id];
+          const isRailwayChecking = rs?.status === 'checking';
           return (
           <div key={p.id} className={`project-item ${selectedProjectId === p.id ? 'active' : ''}`}>
             <button className="project-btn" onClick={() => onSelectProject(p.id)}>

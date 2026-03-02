@@ -23,6 +23,8 @@ export default function App() {
   const [planStartTimes, setPlanStartTimes] = useState({});
   // Per-project test status: Map<projectId, { running: boolean, result?: { passed, summary, output } }>
   const [testStatusMap, setTestStatusMap] = useState({});
+  // Per-project Railway status: Map<projectId, { status: 'unknown'|'checking'|'healthy'|'failed', message: string, checkedAt: number }>
+  const [railwayStatusMap, setRailwayStatusMap] = useState({});
   const [statusMessage, setStatusMessage] = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
   const [templates, setTemplates] = useState([]);
@@ -50,6 +52,20 @@ export default function App() {
       }
       if (Object.keys(testStatuses).length > 0) {
         setTestStatusMap(testStatuses);
+      }
+      // Hydrate railwayStatusMap from cached lastRailwayResult on each project
+      const railwayStatuses = {};
+      for (const p of loaded) {
+        if (p.lastRailwayResult) {
+          railwayStatuses[p.id] = {
+            status: p.lastRailwayResult.healthy ? 'healthy' : 'failed',
+            message: p.lastRailwayResult.message,
+            checkedAt: p.lastRailwayResult.timestamp,
+          };
+        }
+      }
+      if (Object.keys(railwayStatuses).length > 0) {
+        setRailwayStatusMap(railwayStatuses);
       }
     }).catch(console.error);
     api.getTemplates().then(setTemplates).catch(console.error);
@@ -92,6 +108,7 @@ export default function App() {
         setProjects((prev) => prev.filter((p) => p.id !== data.id));
         setTasks((prev) => prev.filter((t) => t.projectId !== data.id));
         setTestStatusMap((prev) => { const next = { ...prev }; delete next[data.id]; return next; });
+        setRailwayStatusMap((prev) => { const next = { ...prev }; delete next[data.id]; return next; });
         break;
       case 'task:created':
         setTasks((prev) => [...prev, data]);
@@ -286,6 +303,22 @@ export default function App() {
           },
         }));
         break;
+      case 'project:railway-checking':
+        setRailwayStatusMap((prev) => ({
+          ...prev,
+          [data.projectId]: { ...prev[data.projectId], status: 'checking' },
+        }));
+        break;
+      case 'project:railway-status':
+        setRailwayStatusMap((prev) => ({
+          ...prev,
+          [data.projectId]: {
+            status: data.healthy ? 'healthy' : 'failed',
+            message: data.message,
+            checkedAt: data.timestamp || Date.now(),
+          },
+        }));
+        break;
       case 'setup-tests:started':
         setSetupMap((prev) => ({
           ...prev,
@@ -465,6 +498,7 @@ export default function App() {
         onClearSetupResult={(id) => setSetupResultMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
         onCreateFixTask={handleCreateFixTask}
         testStatusMap={testStatusMap}
+        railwayStatusMap={railwayStatusMap}
         onClearTestResult={(id) => setTestStatusMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
       />
       <main className="main">

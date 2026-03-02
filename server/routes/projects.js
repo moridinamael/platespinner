@@ -18,6 +18,31 @@ function execPromise(command, args, options = {}) {
   });
 }
 
+async function checkRailwayHealth(project) {
+  const cwd = toWSLPath(project.path);
+  await execPromise(RAILWAY_BIN, ['link', '-p', project.railwayProject, '-e', 'production'], { cwd });
+  const statusOut = await execPromise(RAILWAY_BIN, ['status', '--json'], { cwd });
+  let statusData;
+  try {
+    statusData = JSON.parse(statusOut);
+  } catch {
+    return { healthy: true, message: 'Railway project linked — no deployment data available', timestamp: Date.now() };
+  }
+  const envEdges = statusData.environments?.edges || [];
+  const serviceInstances = envEdges.flatMap(e =>
+    (e.node?.serviceInstances?.edges || []).map(si => si.node)
+  );
+  const failed = serviceInstances.filter(si => {
+    const st = (si.latestDeployment?.status || '').toUpperCase();
+    return st === 'FAILED' || st === 'CRASHED' || st === 'ERROR';
+  });
+  if (failed.length === 0) {
+    return { healthy: true, message: 'All services healthy', timestamp: Date.now() };
+  }
+  const failedNames = failed.map(s => s.serviceName || 'unknown').join(', ');
+  return { healthy: false, message: `Deployment failed (${failedNames})`, failedNames, timestamp: Date.now() };
+}
+
 const router = Router();
 
 router.get('/projects', (req, res) => {
@@ -216,68 +241,45 @@ router.post('/projects/:id/check-railway', async (req, res) => {
   if (!project) return res.status(404).json({ error: 'Project not found' });
   if (!project.railwayProject) return res.status(400).json({ error: 'No Railway project configured' });
 
-  const cwd = toWSLPath(project.path);
+  broadcast('project:railway-checking', { projectId: project.id });
 
   try {
-    // Link to the Railway project
-    await execPromise(RAILWAY_BIN, ['link', '-p', project.railwayProject, '-e', 'production'], { cwd });
-
-    // Get deployment status
-    const statusOut = await execPromise(RAILWAY_BIN, ['status', '--json'], { cwd });
-    let statusData;
-    try {
-      statusData = JSON.parse(statusOut);
-    } catch {
-      const railwayResult = { healthy: true, message: 'Railway project linked — no deployment data available', timestamp: Date.now() };
-      state.updateProject(req.params.id, { lastRailwayResult: railwayResult });
-      return res.json(railwayResult);
-    }
-
-    // Extract service instances from GraphQL-style edges/nodes structure
-    const envEdges = statusData.environments?.edges || [];
-    const serviceInstances = envEdges.flatMap(e =>
-      (e.node?.serviceInstances?.edges || []).map(si => si.node)
-    );
-
-    // Check for failures in latestDeployment status
-    const failed = serviceInstances.filter(si => {
-      const st = (si.latestDeployment?.status || '').toUpperCase();
-      return st === 'FAILED' || st === 'CRASHED' || st === 'ERROR';
-    });
-
-    if (failed.length === 0) {
-      const railwayResult = { healthy: true, message: 'All services healthy', timestamp: Date.now() };
-      state.updateProject(req.params.id, { lastRailwayResult: railwayResult });
-      return res.json(railwayResult);
-    }
-
-    // Fetch build logs for failed deployment
-    let buildLogs = '';
-    try {
-      buildLogs = await execPromise(RAILWAY_BIN, ['logs', '--build', '--lines', '100', '--latest'], { cwd });
-    } catch (logErr) {
-      buildLogs = `(Could not fetch build logs: ${logErr.message})`;
-    }
-
-    const failedNames = failed.map(s => s.serviceName || 'unknown').join(', ');
-    const truncatedLogs = buildLogs.slice(0, 5000);
-    const description = `## Railway Deployment Failed\nFailed services: ${failedNames}\n\n## Build Logs\n\`\`\`\n${truncatedLogs}\n\`\`\``;
-
-    const task = state.addTask({
-      projectId: req.params.id,
-      title: `Fix failed Railway deployment (${failedNames})`,
-      description,
-      rationale: 'Automated: Railway deployment failed — investigate build logs and fix the issue',
-      effort: 'medium',
-    });
-    broadcast('task:created', task);
-
-    const railwayResult = { healthy: false, message: `Deployment failed (${failedNames}) — task created`, taskId: task.id, timestamp: Date.now() };
+    const result = await checkRailwayHealth(project);
+    const railwayResult = { healthy: result.healthy, message: result.message, timestamp: result.timestamp };
     state.updateProject(req.params.id, { lastRailwayResult: railwayResult });
+    broadcast('project:railway-status', { projectId: project.id, ...railwayResult });
+
+    if (!result.healthy) {
+      // Fetch build logs and create fix task (only on manual check)
+      const cwd = toWSLPath(project.path);
+      let buildLogs = '';
+      try {
+        buildLogs = await execPromise(RAILWAY_BIN, ['logs', '--build', '--lines', '100', '--latest'], { cwd });
+      } catch (logErr) {
+        buildLogs = `(Could not fetch build logs: ${logErr.message})`;
+      }
+      const truncatedLogs = buildLogs.slice(0, 5000);
+      const description = `## Railway Deployment Failed\nFailed services: ${result.failedNames}\n\n## Build Logs\n\`\`\`\n${truncatedLogs}\n\`\`\``;
+      const task = state.addTask({
+        projectId: req.params.id,
+        title: `Fix failed Railway deployment (${result.failedNames})`,
+        description,
+        rationale: 'Automated: Railway deployment failed — investigate build logs and fix the issue',
+        effort: 'medium',
+      });
+      broadcast('task:created', task);
+      railwayResult.taskId = task.id;
+      railwayResult.message = `${result.message} — task created`;
+      state.updateProject(req.params.id, { lastRailwayResult: railwayResult });
+    }
+
     return res.json(railwayResult);
   } catch (err) {
+    const failResult = { healthy: false, message: err.message, timestamp: Date.now() };
+    broadcast('project:railway-status', { projectId: project.id, ...failResult });
     return res.status(500).json({ error: err.message });
   }
 });
 
+export { checkRailwayHealth };
 export default router;
