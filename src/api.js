@@ -39,6 +39,7 @@ export const api = {
   setupTests: (id) => request('POST', `/projects/${id}/setup-tests`),
   createFixTask: (projectId, data) => request('POST', `/projects/${projectId}/fix-tests`, data),
   checkRailway: (id) => request('POST', `/projects/${id}/check-railway`),
+  getAgentStatus: () => request('GET', '/agents/status'),
 };
 
 // WebSocket hook

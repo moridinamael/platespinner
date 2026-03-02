@@ -28,6 +28,7 @@ export default function App() {
   const [templates, setTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('builtin:pareto-simple');
   const wsRef = useRef(null);
+  const [agentCensus, setAgentCensus] = useState(null);
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
 
@@ -53,6 +54,7 @@ export default function App() {
     }).catch(console.error);
     api.getTemplates().then(setTemplates).catch(console.error);
     api.getModels().then(setModels).catch(console.error);
+    api.getAgentStatus().then(setAgentCensus).catch(console.error);
     api.getTasks().then((loaded) => {
       setTasks(loaded);
       const execStarts = {};
@@ -273,6 +275,9 @@ export default function App() {
           [data.projectId]: { success: false, summary: data.error },
         }));
         break;
+      case 'agents:census':
+        setAgentCensus(data);
+        break;
     }
   }, []);
 
@@ -476,6 +481,7 @@ export default function App() {
         generatingMap={generatingMap}
         setupMap={setupMap}
         models={models}
+        agentCensus={agentCensus}
       />
     </div>
   );
