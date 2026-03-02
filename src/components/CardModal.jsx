@@ -22,12 +22,13 @@ function getModelProvider(modelId, models) {
   return found ? found.provider : 'claude';
 }
 
-export default function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, models }) {
+export default function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, models }) {
   if (!task) return null;
 
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
+  const isQueued = task.status === 'queued';
   const isExecuting = task.status === 'executing';
   const isDone = task.status === 'done';
 
@@ -164,6 +165,18 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
           <div className="modal-actions">
             <button className="btn btn-dismiss" onClick={() => { onDismiss(task.id); onClose(); }}>
               Cancel Planning
+            </button>
+          </div>
+        )}
+
+        {isQueued && (
+          <div className="modal-actions">
+            <span className="modal-status">Queued{task.queuePosition ? ` #${task.queuePosition}` : ''}</span>
+            <button className="btn btn-abort" onClick={() => { onDequeue(task.id); onClose(); }}>
+              Dequeue
+            </button>
+            <button className="btn btn-dismiss" onClick={() => { onDismiss(task.id); onClose(); }}>
+              Dismiss
             </button>
           </div>
         )}

@@ -3,11 +3,11 @@ import Column from './Column.jsx';
 const COLUMNS = [
   { key: 'proposed', title: 'Proposed', statuses: ['proposed'] },
   { key: 'plan', title: 'Plan', statuses: ['planning', 'planned'] },
-  { key: 'executing', title: 'Executing', statuses: ['executing'] },
+  { key: 'executing', title: 'Executing', statuses: ['queued', 'executing'] },
   { key: 'done', title: 'Done', statuses: ['done'] },
 ];
 
-export default function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onSelectTask, models }) {
+export default function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, models }) {
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]));
 
   return (
@@ -24,6 +24,7 @@ export default function KanbanBoard({ tasks, projects, execStartTimes, planStart
           onPlan={onPlan}
           onDismiss={onDismiss}
           onAbort={onAbort}
+          onDequeue={onDequeue}
           onSelectTask={onSelectTask}
           models={models}
         />

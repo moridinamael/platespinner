@@ -1,6 +1,6 @@
 import Card from './Card.jsx';
 
-export default function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onSelectTask, models }) {
+export default function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, models }) {
   return (
     <div className="column">
       <div className="column-header">
@@ -19,6 +19,7 @@ export default function Column({ title, tasks, projectMap, execStartTimes, planS
             onPlan={onPlan}
             onDismiss={onDismiss}
             onAbort={onAbort}
+            onDequeue={onDequeue}
             onSelect={onSelectTask}
             models={models}
           />

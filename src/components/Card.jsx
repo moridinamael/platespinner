@@ -51,10 +51,11 @@ function getModelProvider(task, models) {
   return 'claude';
 }
 
-export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onSelect, models }) {
+export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, models }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
+  const isQueued = task.status === 'queued';
   const isExecuting = task.status === 'executing';
   const isDone = task.status === 'done';
 
@@ -79,7 +80,7 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
     <div className={`card card-${task.status}`} onClick={() => onSelect(task)} style={{ cursor: 'pointer' }}>
       <div className="card-header">
         <span className="card-title">{task.title}</span>
-        {(isProposed || isPlanned || isPlanning) && (
+        {(isProposed || isPlanned || isPlanning || isQueued) && (
           <button className="card-dismiss" onClick={(e) => { e.stopPropagation(); onDismiss(task.id); }} title={isPlanning ? 'Cancel' : 'Dismiss'}>
             &times;
           </button>
@@ -135,6 +136,19 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
           <button className="btn btn-sm btn-execute" onClick={(e) => { e.stopPropagation(); onExecute(task.id); }}>
             Execute
           </button>
+        )}
+
+        {isQueued && (
+          <span className="executing-status">
+            <span className="queue-badge">Queued{task.queuePosition ? ` #${task.queuePosition}` : ''}</span>
+            <button
+              className="btn btn-sm btn-abort"
+              onClick={(e) => { e.stopPropagation(); onDequeue(task.id); }}
+              title="Remove from queue"
+            >
+              Dequeue
+            </button>
+          </span>
         )}
 
         {isExecuting && (

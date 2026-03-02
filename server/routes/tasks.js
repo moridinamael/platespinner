@@ -67,11 +67,15 @@ router.post('/tasks/:id/execute', async (req, res) => {
     return res.status(400).json({ error: `Task is ${task.status}, expected proposed or planned` });
   }
 
-  if (state.isProjectLocked(task.projectId)) {
-    return res.status(409).json({ error: 'Another task is already executing for this project' });
-  }
-
   const { modelId } = req.body || {};
+
+  if (state.isProjectLocked(task.projectId)) {
+    // Project is busy — enqueue instead of rejecting
+    state.updateTask(task.id, { status: 'queued' });
+    const position = state.enqueueTask(task.projectId, task.id);
+    broadcast('execution:queued', { taskId: task.id, position, projectId: task.projectId });
+    return res.json({ message: 'Queued for execution', taskId: task.id, position });
+  }
 
   // Fire and forget — results come via WebSocket
   res.json({ message: 'Execution started', taskId: task.id });
@@ -81,6 +85,20 @@ router.post('/tasks/:id/execute', async (req, res) => {
   } catch (err) {
     console.error('Execution failed:', err.message);
   }
+});
+
+router.post('/tasks/:id/dequeue', (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  if (task.status !== 'queued') {
+    return res.status(400).json({ error: `Task is ${task.status}, not queued` });
+  }
+
+  state.removeFromQueue(task.projectId, task.id);
+  const revertStatus = task.plan ? 'planned' : 'proposed';
+  state.updateTask(task.id, { status: revertStatus });
+  broadcast('execution:dequeued', { taskId: task.id, projectId: task.projectId });
+  res.json({ message: 'Removed from queue', taskId: task.id });
 });
 
 router.post('/tasks/:id/abort', (req, res) => {

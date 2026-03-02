@@ -193,6 +193,20 @@ export default function App() {
           prev.map((t) => (t.id === data.taskId ? { ...t, gitUntracked: data.files } : t))
         );
         break;
+      case 'execution:queued':
+        setTasks((prev) =>
+          prev.map((t) => (t.id === data.taskId ? { ...t, status: 'queued', queuePosition: data.position } : t))
+        );
+        break;
+      case 'execution:dequeued':
+        setTasks((prev) =>
+          prev.map((t) => {
+            if (t.id !== data.taskId) return t;
+            const revertStatus = t.plan ? 'planned' : 'proposed';
+            return { ...t, status: revertStatus, queuePosition: undefined };
+          })
+        );
+        break;
       case 'execution:completed':
         setExecStartTimes((prev) => {
           const next = { ...prev };
@@ -377,6 +391,15 @@ export default function App() {
     }
   };
 
+  const handleDequeue = async (taskId) => {
+    try {
+      await api.dequeueTask(taskId);
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  };
+
   const handleCreateFixTask = async (projectId, summary, output) => {
     try {
       await api.createFixTask(projectId, { summary, output });
@@ -448,6 +471,7 @@ export default function App() {
             onPlan={handlePlan}
             onDismiss={handleDismiss}
             onAbort={handleAbort}
+            onDequeue={handleDequeue}
             onSelectTask={setSelectedTask}
             models={models}
           />
@@ -475,6 +499,7 @@ export default function App() {
         onPlan={handlePlan}
         onDismiss={handleDismiss}
         onAbort={handleAbort}
+        onDequeue={handleDequeue}
         models={models}
       />
       <PlatesSpinning
