@@ -30,6 +30,8 @@ export const api = {
   planTask: (id, modelId) => request('POST', `/tasks/${id}/plan`, { modelId }),
   executeTask: (id, modelId) => request('POST', `/tasks/${id}/execute`, { modelId }),
   dismissTask: (id) => request('POST', `/tasks/${id}/dismiss`),
+  getQueues: () => request('GET', '/tasks/queue'),
+  getQueue: (projectId) => request('GET', `/tasks/queue?projectId=${projectId}`),
   dequeueTask: (id) => request('POST', `/tasks/${id}/dequeue`),
   abortTask: (id) => request('POST', `/tasks/${id}/abort`),
   pushProject: (id) => request('POST', `/projects/${id}/push`),

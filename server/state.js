@@ -226,6 +226,15 @@ export function isProjectLocked(projectId) {
 
 // --- Execution Queue ---
 
+function _reindexQueuePositions(projectId) {
+  const queue = executionQueues.get(projectId);
+  if (!queue) return;
+  for (let i = 0; i < queue.length; i++) {
+    const t = tasks.get(queue[i]);
+    if (t) t.queuePosition = i + 1;
+  }
+}
+
 function _removeFromQueueInternal(projectId, taskId) {
   const queue = executionQueues.get(projectId);
   if (!queue) return false;
@@ -235,6 +244,11 @@ function _removeFromQueueInternal(projectId, taskId) {
   if (queue.length === 0) {
     executionQueues.delete(projectId);
   }
+  // Clear queuePosition on the removed task
+  const t = tasks.get(taskId);
+  if (t) delete t.queuePosition;
+  // Reindex remaining tasks
+  _reindexQueuePositions(projectId);
   return true;
 }
 
@@ -247,6 +261,7 @@ export function enqueueTask(projectId, taskId) {
   if (!queue.includes(taskId)) {
     queue.push(taskId);
   }
+  _reindexQueuePositions(projectId);
   save();
   return queue.length;
 }
@@ -255,8 +270,13 @@ export function dequeueTask(projectId) {
   const queue = executionQueues.get(projectId);
   if (!queue || queue.length === 0) return null;
   const taskId = queue.shift();
+  // Clear queuePosition on dequeued task
+  const t = tasks.get(taskId);
+  if (t) delete t.queuePosition;
   if (queue.length === 0) {
     executionQueues.delete(projectId);
+  } else {
+    _reindexQueuePositions(projectId);
   }
   save();
   return taskId;
@@ -270,6 +290,22 @@ export function removeFromQueue(projectId, taskId) {
   const removed = _removeFromQueueInternal(projectId, taskId);
   if (removed) save();
   return removed;
+}
+
+export function getQueueSnapshot(projectId) {
+  const queue = executionQueues.get(projectId) || [];
+  return {
+    projectId,
+    queue: queue.map((taskId, i) => ({ taskId, position: i + 1 })),
+  };
+}
+
+export function getAllQueues() {
+  const result = {};
+  for (const [projectId, queue] of executionQueues) {
+    result[projectId] = queue.map((taskId, i) => ({ taskId, position: i + 1 }));
+  }
+  return result;
 }
 
 export function getTaskQueuePosition(taskId) {

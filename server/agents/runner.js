@@ -22,6 +22,7 @@ function advanceQueue(projectId) {
         startedTaskId: nextTaskId,
         queue: state.getQueue(projectId),
       });
+      broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
       runExecution(nextTask, nextTask.executedBy).catch((advanceErr) => {
         console.error('Queue auto-advance failed:', advanceErr.message);
         const staleTask = state.getTask(nextTaskId);
@@ -42,6 +43,8 @@ function advanceQueue(projectId) {
     }
     // Task was dismissed/deleted or status changed — skip it, try next
   }
+  // Queue is empty — broadcast so clients clear stale state
+  broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
 }
 
 const GIT_POLL_MS = 10_000; // poll git status every 10s

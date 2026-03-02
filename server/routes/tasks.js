@@ -10,6 +10,15 @@ router.get('/tasks', (req, res) => {
   res.json(state.getTasks(projectId));
 });
 
+router.get('/tasks/queue', (req, res) => {
+  const { projectId } = req.query;
+  if (projectId) {
+    res.json(state.getQueueSnapshot(projectId));
+  } else {
+    res.json(state.getAllQueues());
+  }
+});
+
 router.post('/generate', async (req, res) => {
   const { projectId, templateId, modelId, promptContent } = req.body;
   let projects;
@@ -74,6 +83,7 @@ router.post('/tasks/:id/execute', async (req, res) => {
     state.updateTask(task.id, { status: 'queued', executedBy: modelId || null });
     const position = state.enqueueTask(task.projectId, task.id);
     broadcast('execution:queued', { taskId: task.id, position, projectId: task.projectId });
+    broadcast('execution:queue-updated', state.getQueueSnapshot(task.projectId));
     return res.json({ message: 'Queued for execution', taskId: task.id, position });
   }
 
@@ -98,6 +108,7 @@ router.post('/tasks/:id/dequeue', (req, res) => {
   const revertStatus = task.plan ? 'planned' : 'proposed';
   state.updateTask(task.id, { status: revertStatus });
   broadcast('execution:dequeued', { taskId: task.id, projectId: task.projectId });
+  broadcast('execution:queue-updated', state.getQueueSnapshot(task.projectId));
   res.json({ message: 'Removed from queue', taskId: task.id });
 });
 
@@ -144,8 +155,13 @@ router.post('/tasks/:id/dismiss', (req, res) => {
     state.removeProcess(req.params.id);
   }
 
+  const projectId = task.projectId;
+  const wasQueued = task.status === 'queued';
   state.removeTask(req.params.id);
   broadcast('task:dismissed', { id: req.params.id });
+  if (wasQueued) {
+    broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
+  }
   res.status(204).end();
 });
 

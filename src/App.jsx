@@ -66,6 +66,17 @@ export default function App() {
       setExecStartTimes(execStarts);
       setPlanStartTimes(planStarts);
     }).catch(console.error);
+    // Hydrate queue positions from server
+    api.getQueues().then((queues) => {
+      // queues is { projectId: [{ taskId, position }], ... }
+      setTasks((prev) => prev.map((t) => {
+        const projectQueue = queues[t.projectId];
+        if (!projectQueue) return t;
+        const entry = projectQueue.find((q) => q.taskId === t.id);
+        if (entry) return { ...t, queuePosition: entry.position };
+        return t;
+      }));
+    }).catch(console.error);
   }, []);
 
   // WebSocket connection
@@ -218,6 +229,19 @@ export default function App() {
             return { ...t, status: revertStatus, queuePosition: undefined };
           })
         );
+        break;
+      case 'execution:queue-updated':
+        setTasks((prev) => prev.map((t) => {
+          if (t.projectId !== data.projectId) return t;
+          const entry = data.queue.find((q) => q.taskId === t.id);
+          if (entry) return { ...t, queuePosition: entry.position };
+          // Clear stale queuePosition for tasks no longer in queue
+          if (t.queuePosition !== undefined) {
+            const { queuePosition: _, ...rest } = t;
+            return rest;
+          }
+          return t;
+        }));
         break;
       case 'execution:completed':
         setExecStartTimes((prev) => {
