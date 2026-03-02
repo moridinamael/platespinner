@@ -65,7 +65,7 @@ load();
 
 export function addProject({ name, path, url, testCommand }) {
   const id = randomUUID();
-  const project = { id, name: name || path.split('/').filter(Boolean).pop(), path, url: url || null, testCommand: testCommand || null, autoTestOnCommit: false };
+  const project = { id, name: name || path.split('/').filter(Boolean).pop(), path, url: url || null, testCommand: testCommand || null, autoTestOnCommit: false, lastTestResult: null, lastRailwayResult: null };
   projects.set(id, project);
   save();
   return project;

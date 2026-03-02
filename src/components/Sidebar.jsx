@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api } from '../api.js';
 
 export default function Sidebar({
@@ -63,6 +63,33 @@ export default function Sidebar({
     api.getTestInfo(selectedProjectId).then(setTestInfo).catch(() => {});
     api.getGitStatus(selectedProjectId).then(setGitInfo).catch(() => {});
   }, [setupResult, selectedProjectId]);
+
+  // Hydrate railwayResultMap from cached project data on first load, and queue fresh checks
+  const railwayHydrated = useRef(false);
+  useEffect(() => {
+    if (railwayHydrated.current || projects.length === 0) return;
+    railwayHydrated.current = true;
+    const cached = {};
+    for (const p of projects) {
+      if (p.lastRailwayResult) {
+        cached[p.id] = { ...p.lastRailwayResult, checkedAt: p.lastRailwayResult.timestamp };
+      }
+    }
+    if (Object.keys(cached).length > 0) {
+      setRailwayResultMap(cached);
+    }
+    // Queue fresh Railway checks for configured projects (fire-and-forget)
+    for (const p of projects) {
+      if (p.railwayProject) {
+        const pid = p.id;
+        api.checkRailway(pid)
+          .then((result) => {
+            setRailwayResultMap((prev) => ({ ...prev, [pid]: { ...result, checkedAt: Date.now() } }));
+          })
+          .catch(() => {});
+      }
+    }
+  }, [projects]);
 
   const handleSubmit = (e) => {
     e.preventDefault();

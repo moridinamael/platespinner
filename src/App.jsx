@@ -34,7 +34,22 @@ export default function App() {
 
   // Load initial data
   useEffect(() => {
-    api.getProjects().then(setProjects).catch(console.error);
+    api.getProjects().then((loaded) => {
+      setProjects(loaded);
+      // Hydrate testStatusMap from cached lastTestResult on each project
+      const testStatuses = {};
+      for (const p of loaded) {
+        if (p.lastTestResult) {
+          testStatuses[p.id] = {
+            running: false,
+            result: { passed: p.lastTestResult.passed, summary: p.lastTestResult.summary, output: p.lastTestResult.output, checkedAt: p.lastTestResult.timestamp },
+          };
+        }
+      }
+      if (Object.keys(testStatuses).length > 0) {
+        setTestStatusMap(testStatuses);
+      }
+    }).catch(console.error);
     api.getTemplates().then(setTemplates).catch(console.error);
     api.getModels().then(setModels).catch(console.error);
     api.getTasks().then((loaded) => {
@@ -62,6 +77,7 @@ export default function App() {
       case 'project:removed':
         setProjects((prev) => prev.filter((p) => p.id !== data.id));
         setTasks((prev) => prev.filter((t) => t.projectId !== data.id));
+        setTestStatusMap((prev) => { const next = { ...prev }; delete next[data.id]; return next; });
         break;
       case 'task:created':
         setTasks((prev) => [...prev, data]);

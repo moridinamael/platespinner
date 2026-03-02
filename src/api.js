@@ -34,6 +34,7 @@ export const api = {
   pushProject: (id) => request('POST', `/projects/${id}/push`),
   getGitStatus: (id) => request('GET', `/projects/${id}/git-status`),
   getTestInfo: (id) => request('GET', `/projects/${id}/test-info`),
+  getLastTestResult: (id) => request('GET', `/projects/${id}/last-test-result`),
   runTests: (id) => request('POST', `/projects/${id}/test`),
   setupTests: (id) => request('POST', `/projects/${id}/setup-tests`),
   createFixTask: (projectId, data) => request('POST', `/projects/${projectId}/fix-tests`, data),

@@ -79,8 +79,10 @@ router.post('/projects/:id/push', (req, res) => {
     if (project.autoTestOnCommit) {
       broadcast('project:test-started', { projectId: project.id });
       runTests(project).then((testResult) => {
+        state.updateProject(project.id, { lastTestResult: { passed: testResult.passed, summary: testResult.summary, output: testResult.output, timestamp: Date.now() } });
         broadcast('project:test-completed', { projectId: project.id, passed: testResult.passed, summary: testResult.summary, output: testResult.output });
       }).catch((err) => {
+        state.updateProject(project.id, { lastTestResult: { passed: false, summary: err.message || 'Auto-test failed', output: '', timestamp: Date.now() } });
         broadcast('project:test-completed', { projectId: project.id, passed: false, summary: err.message || 'Auto-test failed', output: '' });
       });
     }
@@ -126,6 +128,13 @@ router.get('/projects/:id/test-info', (req, res) => {
   res.json({ source: 'none', description: null });
 });
 
+// Cached last test result (no re-run)
+router.get('/projects/:id/last-test-result', (req, res) => {
+  const project = state.getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  res.json(project.lastTestResult || null);
+});
+
 // Run tests (async — results broadcast via WebSocket)
 router.post('/projects/:id/test', (req, res) => {
   const project = state.getProject(req.params.id);
@@ -136,6 +145,7 @@ router.post('/projects/:id/test', (req, res) => {
 
   runTests(project)
     .then((result) => {
+      state.updateProject(project.id, { lastTestResult: { passed: result.passed, summary: result.summary, output: result.output, timestamp: Date.now() } });
       broadcast('project:test-completed', {
         projectId: project.id,
         passed: result.passed,
@@ -144,6 +154,7 @@ router.post('/projects/:id/test', (req, res) => {
       });
     })
     .catch((err) => {
+      state.updateProject(project.id, { lastTestResult: { passed: false, summary: err.message || 'Test execution error', output: '', timestamp: Date.now() } });
       broadcast('project:test-completed', {
         projectId: project.id,
         passed: false,
@@ -217,7 +228,9 @@ router.post('/projects/:id/check-railway', async (req, res) => {
     try {
       statusData = JSON.parse(statusOut);
     } catch {
-      return res.json({ healthy: true, message: 'Railway project linked — no deployment data available' });
+      const railwayResult = { healthy: true, message: 'Railway project linked — no deployment data available', timestamp: Date.now() };
+      state.updateProject(req.params.id, { lastRailwayResult: railwayResult });
+      return res.json(railwayResult);
     }
 
     // Extract service instances from GraphQL-style edges/nodes structure
@@ -233,7 +246,9 @@ router.post('/projects/:id/check-railway', async (req, res) => {
     });
 
     if (failed.length === 0) {
-      return res.json({ healthy: true, message: 'All services healthy' });
+      const railwayResult = { healthy: true, message: 'All services healthy', timestamp: Date.now() };
+      state.updateProject(req.params.id, { lastRailwayResult: railwayResult });
+      return res.json(railwayResult);
     }
 
     // Fetch build logs for failed deployment
@@ -257,7 +272,9 @@ router.post('/projects/:id/check-railway', async (req, res) => {
     });
     broadcast('task:created', task);
 
-    return res.json({ healthy: false, message: `Deployment failed (${failedNames}) — task created`, taskId: task.id });
+    const railwayResult = { healthy: false, message: `Deployment failed (${failedNames}) — task created`, taskId: task.id, timestamp: Date.now() };
+    state.updateProject(req.params.id, { lastRailwayResult: railwayResult });
+    return res.json(railwayResult);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
