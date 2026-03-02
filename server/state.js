@@ -12,6 +12,7 @@ const tasks = new Map();
 const promptTemplates = new Map();
 const runningProcesses = new Map(); // taskId → ChildProcess
 const projectLocks = new Set();     // projectIds currently executing
+const executionQueues = new Map();  // projectId → taskId[]
 
 // --- Persistence ---
 
@@ -22,6 +23,7 @@ function save() {
       projects: [...projects.values()],
       tasks: [...tasks.values()],
       promptTemplates: [...promptTemplates.values()],
+      executionQueues: Object.fromEntries(executionQueues),
     };
     writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
   } catch (err) {
@@ -36,6 +38,13 @@ function load() {
     for (const p of data.projects || []) projects.set(p.id, p);
     for (const t of data.tasks || []) tasks.set(t.id, t);
     for (const pt of data.promptTemplates || []) promptTemplates.set(pt.id, pt);
+    if (data.executionQueues) {
+      for (const [projectId, queue] of Object.entries(data.executionQueues)) {
+        if (Array.isArray(queue) && queue.length > 0) {
+          executionQueues.set(projectId, queue);
+        }
+      }
+    }
     console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from disk`);
 
     // Recover tasks stuck in transient states from a previous server crash
@@ -48,9 +57,14 @@ function load() {
       } else if (t.status === 'planning') {
         t.status = 'proposed';
         recovered++;
+      } else if (t.status === 'queued') {
+        t.status = t.plan ? 'planned' : 'proposed';
+        t.agentLog = (t.agentLog ? t.agentLog + '\n' : '') + '[Server restarted — task was dequeued]';
+        recovered++;
       }
     }
     if (recovered > 0) {
+      executionQueues.clear();
       console.log(`Recovered ${recovered} task(s) stuck in transient states`);
       save();
     }
@@ -89,6 +103,7 @@ export function getProject(id) {
 
 export function removeProject(id) {
   projects.delete(id);
+  executionQueues.delete(id);
   for (const [taskId, task] of tasks) {
     if (task.projectId === id) tasks.delete(taskId);
   }
@@ -136,6 +151,10 @@ export function updateTask(id, updates) {
 }
 
 export function removeTask(id) {
+  const task = tasks.get(id);
+  if (task) {
+    _removeFromQueueInternal(task.projectId, id);
+  }
   const result = tasks.delete(id);
   save();
   return result;
@@ -203,4 +222,60 @@ export function unlockProject(projectId) {
 
 export function isProjectLocked(projectId) {
   return projectLocks.has(projectId);
+}
+
+// --- Execution Queue ---
+
+function _removeFromQueueInternal(projectId, taskId) {
+  const queue = executionQueues.get(projectId);
+  if (!queue) return false;
+  const idx = queue.indexOf(taskId);
+  if (idx === -1) return false;
+  queue.splice(idx, 1);
+  if (queue.length === 0) {
+    executionQueues.delete(projectId);
+  }
+  return true;
+}
+
+export function enqueueTask(projectId, taskId) {
+  let queue = executionQueues.get(projectId);
+  if (!queue) {
+    queue = [];
+    executionQueues.set(projectId, queue);
+  }
+  if (!queue.includes(taskId)) {
+    queue.push(taskId);
+  }
+  save();
+  return queue.length;
+}
+
+export function dequeueTask(projectId) {
+  const queue = executionQueues.get(projectId);
+  if (!queue || queue.length === 0) return null;
+  const taskId = queue.shift();
+  if (queue.length === 0) {
+    executionQueues.delete(projectId);
+  }
+  save();
+  return taskId;
+}
+
+export function getQueue(projectId) {
+  return executionQueues.get(projectId) || [];
+}
+
+export function removeFromQueue(projectId, taskId) {
+  const removed = _removeFromQueueInternal(projectId, taskId);
+  if (removed) save();
+  return removed;
+}
+
+export function getTaskQueuePosition(taskId) {
+  for (const [projectId, queue] of executionQueues) {
+    const idx = queue.indexOf(taskId);
+    if (idx !== -1) return { projectId, position: idx + 1, total: queue.length };
+  }
+  return null;
 }
