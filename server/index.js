@@ -8,6 +8,7 @@ import { setupWebSocket } from './ws.js';
 import projectRoutes from './routes/projects.js';
 import taskRoutes from './routes/tasks.js';
 import templateRoutes from './routes/templates.js';
+import agentRoutes from './routes/agents.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distPath = join(__dirname, '..', 'dist');
@@ -21,6 +22,7 @@ app.use(express.json());
 app.use('/api', projectRoutes);
 app.use('/api', taskRoutes);
 app.use('/api', templateRoutes);
+app.use('/api', agentRoutes);
 
 // Proxy for iframe preview — strips X-Frame-Options / CSP frame-ancestors
 app.get('/api/proxy', (req, res) => {

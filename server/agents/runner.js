@@ -8,6 +8,7 @@ import { toWSLPath } from '../paths.js';
 import { DEFAULT_MODEL_ID } from '../models.js';
 import { runTests } from '../testing.js';
 import * as state from '../state.js';
+import { registerAgent, unregisterAgent } from '../census.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
 const GIT_POLL_MS = 10_000; // poll git status every 10s
@@ -136,6 +137,7 @@ export async function runGeneration(project, templateId, modelId, promptContent)
   const { cmd, args, useStdin } = buildGenerationCommand(modelId, prompt);
 
   broadcast('generation:started', { projectId: project.id });
+  const agentId = registerAgent({ type: 'generating', projectId: project.id, modelId });
 
   try {
     const { promise } = spawnAgent(
@@ -183,6 +185,8 @@ export async function runGeneration(project, templateId, modelId, promptContent)
       error: err.message,
     });
     throw err;
+  } finally {
+    unregisterAgent(agentId);
   }
 }
 
@@ -196,6 +200,7 @@ export async function runPlanning(task, modelId) {
 
   state.updateTask(task.id, { status: 'planning' });
   broadcast('planning:started', { taskId: task.id });
+  const agentId = registerAgent({ type: 'planning', projectId: project.id, taskId: task.id, modelId });
 
   const { proc, promise } = spawnAgent(
     cmd, args, project.path,
@@ -221,6 +226,7 @@ export async function runPlanning(task, modelId) {
     throw err;
   } finally {
     state.removeProcess(task.id);
+    unregisterAgent(agentId);
   }
 }
 
@@ -238,6 +244,7 @@ export async function runExecution(task, modelId) {
 
   state.updateTask(task.id, { status: 'executing', executedBy: modelId });
   broadcast('execution:started', { taskId: task.id });
+  const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
 
   const stopPolling = pollGitStatus(toWSLPath(project.path), task.id);
 
@@ -285,6 +292,7 @@ export async function runExecution(task, modelId) {
     state.clearAborted(task.id);
     stopPolling();
     state.unlockProject(project.id);
+    unregisterAgent(agentId);
   }
 }
 
@@ -297,6 +305,7 @@ export async function runTestSetup(project, testInfo) {
   const { cmd, args, useStdin } = buildTestSetupCommand(DEFAULT_MODEL_ID, prompt);
 
   broadcast('setup-tests:started', { projectId: project.id });
+  const agentId = registerAgent({ type: 'settingUpTests', projectId: project.id, modelId: DEFAULT_MODEL_ID });
 
   try {
     const { promise } = spawnAgent(
@@ -329,5 +338,6 @@ export async function runTestSetup(project, testInfo) {
     throw err;
   } finally {
     state.unlockProject(project.id);
+    unregisterAgent(agentId);
   }
 }
