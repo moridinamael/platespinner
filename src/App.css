@@ -1071,6 +1071,8 @@ html, body {
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.15);
   transition: border-color 0.15s, transform 0.2s ease, box-shadow 0.2s ease;
+  display: flex;
+  flex-direction: column;
 }
 
 .card:hover {
@@ -1119,7 +1121,7 @@ html, body {
 }
 
 .card-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   line-height: 1.3;
   color: var(--text);
@@ -1177,13 +1179,18 @@ html, body {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  background: rgba(108, 138, 255, 0.06);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border-left: 2px solid rgba(108, 138, 255, 0.2);
 }
 
 .card-plan-preview {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-dim);
-  background: var(--surface-2);
+  background: rgba(167, 139, 250, 0.08);
+  border-left: 2px solid rgba(167, 139, 250, 0.25);
   border-radius: var(--radius-sm);
   padding: 10px;
   margin-bottom: 12px;
@@ -1194,11 +1201,17 @@ html, body {
   overflow: hidden;
 }
 
+.card-body {
+  flex: 1;
+}
+
 .card-footer {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 12px;
 }
 
 .effort-badge {
@@ -1305,9 +1318,12 @@ html, body {
 }
 
 .queue-badge {
-  font-size: 12px;
-  color: #f59e0b;
+  font-size: 11px;
   font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  padding: 2px 6px;
+  border-radius: 3px;
 }
 
 /* ===== Spinner ===== */

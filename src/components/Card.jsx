@@ -55,15 +55,17 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
         )}
       </div>
 
-      <p className="card-description">{task.description}</p>
+      <div className="card-body">
+        <p className="card-description">{task.description}</p>
 
-      {task.rationale && <p className="card-rationale">{task.rationale}</p>}
+        {task.rationale && <p className="card-rationale">{task.rationale}</p>}
 
-      {isPlanned && task.plan && (
-        <div className="card-plan-preview" onClick={(e) => e.stopPropagation()}>
-          {task.plan.slice(0, 150)}...
-        </div>
-      )}
+        {isPlanned && task.plan && (
+          <div className="card-plan-preview" onClick={(e) => e.stopPropagation()}>
+            {task.plan.slice(0, 150)}...
+          </div>
+        )}
+      </div>
 
       <div className="card-footer">
         <span
