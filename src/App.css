@@ -383,6 +383,28 @@ html, body {
   letter-spacing: 0.8px;
 }
 
+.setting-field-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.setting-field-row .setting-label {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.setting-checkbox {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .input-sm {
   padding: 7px 10px;
   font-size: 13px;

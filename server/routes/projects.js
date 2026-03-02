@@ -45,6 +45,7 @@ router.patch('/projects/:id', (req, res) => {
   if ('url' in req.body) updates.url = req.body.url || null;
   if ('testCommand' in req.body) updates.testCommand = req.body.testCommand || null;
   if ('railwayProject' in req.body) updates.railwayProject = req.body.railwayProject || null;
+  if ('autoTestOnCommit' in req.body) updates.autoTestOnCommit = !!req.body.autoTestOnCommit;
   const updated = state.updateProject(req.params.id, updates);
   broadcast('project:updated', updated);
   res.json(updated);
@@ -73,6 +74,17 @@ router.post('/projects/:id/push', (req, res) => {
     // stderr often contains the push progress info from git
     const output = (stdout + '\n' + stderr).trim();
     broadcast('project:pushed', { id: project.id, output });
+
+    // Auto-test after push if enabled
+    if (project.autoTestOnCommit) {
+      broadcast('project:test-started', { projectId: project.id });
+      runTests(project).then((testResult) => {
+        broadcast('project:test-completed', { projectId: project.id, passed: testResult.passed, summary: testResult.summary, output: testResult.output });
+      }).catch((err) => {
+        broadcast('project:test-completed', { projectId: project.id, passed: false, summary: err.message || 'Auto-test failed', output: '' });
+      });
+    }
+
     res.json({ success: true, output });
   });
 });

@@ -6,6 +6,7 @@ import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, build
 import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput } from './parser.js';
 import { toWSLPath } from '../paths.js';
 import { DEFAULT_MODEL_ID } from '../models.js';
+import { runTests } from '../testing.js';
 import * as state from '../state.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
@@ -260,6 +261,16 @@ export async function runExecution(task, modelId) {
 
     const updated = state.updateTask(task.id, updates);
     broadcast('execution:completed', { taskId: task.id, ...updates, result });
+
+    // Auto-test after execution commit if enabled
+    if (result.commitHash && project.autoTestOnCommit) {
+      broadcast('project:test-started', { projectId: project.id });
+      runTests(project).then((testResult) => {
+        broadcast('project:test-completed', { projectId: project.id, passed: testResult.passed, summary: testResult.summary, output: testResult.output });
+      }).catch((err) => {
+        broadcast('project:test-completed', { projectId: project.id, passed: false, summary: err.message || 'Auto-test failed', output: '' });
+      });
+    }
 
     return updated;
   } catch (err) {

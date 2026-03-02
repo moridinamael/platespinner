@@ -228,6 +228,19 @@ export default function Sidebar({
               onKeyDown={(e) => { if (e.key === 'Enter') { e.target.blur(); } }}
             />
           </label>
+          <label className="setting-field setting-field-row">
+            <input
+              type="checkbox"
+              className="setting-checkbox"
+              checked={!!selectedProject?.autoTestOnCommit}
+              onChange={async (e) => {
+                try {
+                  await api.updateProject(selectedProjectId, { autoTestOnCommit: e.target.checked });
+                } catch { /* ignore */ }
+              }}
+            />
+            <span className="setting-label">Auto-test after commit</span>
+          </label>
         </div>
       )}
 
