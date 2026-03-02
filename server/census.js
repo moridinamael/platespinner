@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { broadcast } from './ws.js';
+import { getModel } from './models.js';
 
 const activeAgents = new Map(); // agentId → { id, type, projectId, taskId, modelId, startedAt }
 
@@ -18,14 +19,15 @@ export function unregisterAgent(agentId) {
 
 export function getAgentCounts() {
   const agents = [...activeAgents.values()];
-  const counts = { generating: 0, planning: 0, executing: 0, settingUpTests: 0, total: agents.length };
+  const byType = { generating: 0, planning: 0, executing: 0, settingUpTests: 0 };
+  const byProvider = { claude: 0, gemini: 0, codex: 0 };
   for (const a of agents) {
-    if (a.type === 'generating') counts.generating++;
-    else if (a.type === 'planning') counts.planning++;
-    else if (a.type === 'executing') counts.executing++;
-    else if (a.type === 'settingUpTests') counts.settingUpTests++;
+    if (a.type in byType) byType[a.type]++;
+    const model = a.modelId ? getModel(a.modelId) : null;
+    const provider = model ? model.provider : null;
+    if (provider && provider in byProvider) byProvider[provider]++;
   }
-  return { counts, agents };
+  return { total: agents.length, byType, byProvider, agents };
 }
 
 function broadcastCensus() {
