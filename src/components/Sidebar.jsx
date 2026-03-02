@@ -26,12 +26,14 @@ export default function Sidebar({
   const [creatingFix, setCreatingFix] = useState(false);
   const [fixCreated, setFixCreated] = useState(false);
   const [railwayInput, setRailwayInput] = useState('');
-  const [checkingRailway, setCheckingRailway] = useState(false);
-  const [railwayResult, setRailwayResult] = useState(null);
+  const [checkingRailwayMap, setCheckingRailwayMap] = useState({});
+  const [railwayResultMap, setRailwayResultMap] = useState({});
 
   const testStatus = testStatusMap[selectedProjectId];
   const testing = !!testStatus?.running;
   const testResult = testStatus?.result || null;
+  const checkingRailway = !!checkingRailwayMap[selectedProjectId];
+  const railwayResult = railwayResultMap[selectedProjectId] || null;
   const settingUp = !!setupMap[selectedProjectId];
   const setupResult = setupResultMap[selectedProjectId] || null;
   const setupProgress = setupMap[selectedProjectId] || null;
@@ -51,7 +53,6 @@ export default function Sidebar({
     setUrlInput(selectedProject?.url || '');
     setTestCmdInput(selectedProject?.testCommand || '');
     setRailwayInput(selectedProject?.railwayProject || '');
-    setRailwayResult(null);
     api.getGitStatus(selectedProjectId).then(setGitInfo).catch(() => setGitInfo(null));
     api.getTestInfo(selectedProjectId).then(setTestInfo).catch(() => setTestInfo(null));
   }, [selectedProjectId, selectedProject?.url, selectedProject?.testCommand, selectedProject?.railwayProject]);
@@ -124,19 +125,42 @@ export default function Sidebar({
 
   const handleCheckRailway = async () => {
     if (!selectedProjectId) return;
-    setCheckingRailway(true);
-    setRailwayResult(null);
+    const pid = selectedProjectId;
+    setCheckingRailwayMap(prev => ({ ...prev, [pid]: true }));
     try {
-      const result = await api.checkRailway(selectedProjectId);
-      setRailwayResult(result);
+      const result = await api.checkRailway(pid);
+      setRailwayResultMap(prev => ({ ...prev, [pid]: { ...result, checkedAt: Date.now() } }));
     } catch (err) {
-      setRailwayResult({ healthy: false, message: err.message });
+      setRailwayResultMap(prev => ({ ...prev, [pid]: { healthy: false, message: err.message, checkedAt: Date.now() } }));
     } finally {
-      setCheckingRailway(false);
+      setCheckingRailwayMap(prev => { const next = { ...prev }; delete next[pid]; return next; });
     }
   };
 
   const canRunTests = testInfo && testInfo.source !== 'none';
+
+  function getProjectStatusColor(projectId) {
+    const ts = testStatusMap[projectId];
+    const rr = railwayResultMap[projectId];
+    const isRunning = !!ts?.running || !!checkingRailwayMap[projectId];
+    if (isRunning) return 'yellow';
+    if (ts?.result && !ts.result.passed) return 'red';
+    if (rr && !rr.healthy) return 'red';
+    if (ts?.result?.passed) return 'green';
+    if (rr?.healthy) return 'green';
+    return null;
+  }
+
+  function formatTimeAgo(timestamp) {
+    if (!timestamp) return null;
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  }
 
   return (
     <aside className="sidebar">
@@ -163,18 +187,50 @@ export default function Sidebar({
           All Projects
         </button>
         {projects.map((p) => {
+          const statusColor = getProjectStatusColor(p.id);
           const ts = testStatusMap[p.id];
-          const dotClass = ts?.running
-            ? 'test-dot test-dot-running'
-            : ts?.result
-              ? ts.result.passed ? 'test-dot test-dot-pass' : 'test-dot test-dot-fail'
-              : '';
+          const rr = railwayResultMap[p.id];
+          const isTestRunning = !!ts?.running;
+          const isRailwayChecking = !!checkingRailwayMap[p.id];
           return (
           <div key={p.id} className={`project-item ${selectedProjectId === p.id ? 'active' : ''}`}>
             <button className="project-btn" onClick={() => onSelectProject(p.id)}>
-              {dotClass && <span className={dotClass} />}
               <span className="project-name">{p.name}</span>
             </button>
+            {statusColor && (
+              <span className="status-dot-wrapper">
+                <span className={`status-dot status-dot-${statusColor}`} />
+                <span className="status-tooltip">
+                  <span className="status-tooltip-row">
+                    <span className="status-tooltip-label">Tests:</span>
+                    <span className={`status-tooltip-value ${
+                      isTestRunning ? 'status-running' :
+                      ts?.result ? (ts.result.passed ? 'status-ok' : 'status-err') : ''
+                    }`}>
+                      {isTestRunning ? 'running...' :
+                       ts?.result ? ts.result.summary : 'not run'}
+                    </span>
+                  </span>
+                  {(p.railwayProject || rr) && (
+                    <span className="status-tooltip-row">
+                      <span className="status-tooltip-label">Railway:</span>
+                      <span className={`status-tooltip-value ${
+                        isRailwayChecking ? 'status-running' :
+                        rr ? (rr.healthy ? 'status-ok' : 'status-err') : ''
+                      }`}>
+                        {isRailwayChecking ? 'checking...' :
+                         rr ? rr.message : 'not checked'}
+                      </span>
+                    </span>
+                  )}
+                  {(ts?.result?.checkedAt || rr?.checkedAt) && (
+                    <span className="status-tooltip-time">
+                      {formatTimeAgo(Math.max(ts?.result?.checkedAt || 0, rr?.checkedAt || 0))}
+                    </span>
+                  )}
+                </span>
+              </span>
+            )}
             <button
               className="project-remove"
               onClick={(e) => {

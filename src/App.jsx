@@ -213,7 +213,7 @@ export default function App() {
           ...prev,
           [data.projectId]: {
             running: false,
-            result: { passed: data.passed, summary: data.summary, output: data.output },
+            result: { passed: data.passed, summary: data.summary, output: data.output, checkedAt: Date.now() },
           },
         }));
         break;
