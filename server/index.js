@@ -2,6 +2,8 @@ import express from 'express';
 import { createServer } from 'http';
 import https from 'https';
 import http from 'http';
+import dns from 'dns';
+import net from 'net';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { setupWebSocket } from './ws.js';
@@ -11,6 +13,39 @@ import templateRoutes from './routes/templates.js';
 import agentRoutes from './routes/agents.js';
 import * as state from './state.js';
 import { broadcast } from './ws.js';
+
+function isPrivateIP(ip) {
+  // Handle IPv4-mapped IPv6 (::ffff:x.x.x.x)
+  if (ip.startsWith('::ffff:')) {
+    ip = ip.slice(7);
+  }
+
+  if (net.isIPv4(ip)) {
+    const octets = ip.split('.').map(Number);
+    const [a, b] = octets;
+    if (a === 0) return true;         // 0.0.0.0/8
+    if (a === 10) return true;        // 10.0.0.0/8
+    if (a === 127) return true;       // 127.0.0.0/8
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true;           // 192.168.0.0/16
+    if (a === 169 && b === 254) return true;           // 169.254.0.0/16
+    return false;
+  }
+
+  if (net.isIPv6(ip)) {
+    if (ip === '::1') return true;    // loopback
+    const groups = ip.split(':');
+    const first = groups[0].toLowerCase();
+    if (first.length > 0) {
+      const val = parseInt(first, 16);
+      if (val >= 0xfc00 && val <= 0xfdff) return true; // fc00::/7
+      if (val >= 0xfe80 && val <= 0xfebf) return true; // fe80::/10
+    }
+    return false;
+  }
+
+  return true; // Unknown format — reject to be safe
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distPath = join(__dirname, '..', 'dist');
@@ -27,20 +62,36 @@ app.use('/api', templateRoutes);
 app.use('/api', agentRoutes);
 
 // Proxy for iframe preview — strips X-Frame-Options / CSP frame-ancestors
-app.get('/api/proxy', (req, res) => {
+app.get('/api/proxy', async (req, res) => {
   const target = req.query.url;
   if (!target) return res.status(400).json({ error: 'url query param required' });
 
   let parsed;
   try { parsed = new URL(target); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
 
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return res.status(400).json({ error: 'Only http and https URLs are allowed' });
+  }
+
+  let resolvedAddress;
+  try {
+    const { address } = await dns.promises.lookup(parsed.hostname);
+    if (isPrivateIP(address)) {
+      return res.status(403).json({ error: 'Access to private/internal addresses is not allowed' });
+    }
+    resolvedAddress = address;
+  } catch (err) {
+    return res.status(400).json({ error: `Cannot resolve hostname: ${err.message}` });
+  }
+
   const mod = parsed.protocol === 'https:' ? https : http;
   const options = {
-    hostname: parsed.hostname,
+    hostname: resolvedAddress,
     port: parsed.port,
     path: parsed.pathname + parsed.search,
     headers: { 'Accept': 'text/html,*/*', 'Host': parsed.hostname },
-    rejectAuthorized: false,
+    rejectUnauthorized: false,
+    servername: parsed.hostname,
   };
 
   const proxyReq = mod.get(options, (upstream) => {
