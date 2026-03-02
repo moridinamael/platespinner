@@ -280,6 +280,10 @@ html, body {
   50% { opacity: 0.4; }
 }
 
+.status-dot-gray {
+  background: #6b7280;
+}
+
 .status-dot-wrapper {
   position: relative;
   display: flex;
@@ -291,7 +295,7 @@ html, body {
 .status-tooltip {
   display: none;
   position: absolute;
-  right: calc(100% + 8px);
+  left: calc(100% + 8px);
   top: 50%;
   transform: translateY(-50%);
   background: var(--surface-2);

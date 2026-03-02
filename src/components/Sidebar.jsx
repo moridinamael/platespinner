@@ -175,7 +175,7 @@ export default function Sidebar({
     if (rr && !rr.healthy) return 'red';
     if (ts?.result?.passed) return 'green';
     if (rr?.healthy) return 'green';
-    return null;
+    return 'gray';
   }
 
   function formatTimeAgo(timestamp) {
@@ -222,9 +222,6 @@ export default function Sidebar({
           return (
           <div key={p.id} className={`project-item ${selectedProjectId === p.id ? 'active' : ''}`}>
             <button className="project-btn" onClick={() => onSelectProject(p.id)}>
-              <span className="project-name">{p.name}</span>
-            </button>
-            {statusColor && (
               <span className="status-dot-wrapper">
                 <span className={`status-dot status-dot-${statusColor}`} />
                 <span className="status-tooltip">
@@ -257,7 +254,8 @@ export default function Sidebar({
                   )}
                 </span>
               </span>
-            )}
+              <span className="project-name">{p.name}</span>
+            </button>
             <button
               className="project-remove"
               onClick={(e) => {
