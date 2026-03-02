@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { writeFile, mkdir } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -16,18 +17,60 @@ const executionQueues = new Map();  // projectId → taskId[]
 
 // --- Persistence ---
 
+let _dirty = false;
+let _debounceTimer = null;
+let _writing = false;
+const DEBOUNCE_MS = 500;
+
+function _serialize() {
+  return JSON.stringify({
+    projects: [...projects.values()],
+    tasks: [...tasks.values()],
+    promptTemplates: [...promptTemplates.values()],
+    executionQueues: Object.fromEntries(executionQueues),
+  }, null, 2);
+}
+
 function save() {
+  _dirty = true;
+  if (!_debounceTimer) {
+    _debounceTimer = setTimeout(_writeToDisk, DEBOUNCE_MS);
+  }
+}
+
+async function _writeToDisk() {
+  _debounceTimer = null;
+  if (!_dirty || _writing) return;
+  _dirty = false;
+  _writing = true;
   try {
-    mkdirSync(DATA_DIR, { recursive: true });
-    const data = {
-      projects: [...projects.values()],
-      tasks: [...tasks.values()],
-      promptTemplates: [...promptTemplates.values()],
-      executionQueues: Object.fromEntries(executionQueues),
-    };
-    writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    await mkdir(DATA_DIR, { recursive: true });
+    await writeFile(DATA_FILE, _serialize());
   } catch (err) {
     console.error('Failed to save state:', err.message);
+    _dirty = true; // mark dirty again so next debounce retries
+  } finally {
+    _writing = false;
+    // If dirtied again during the write, schedule another
+    if (_dirty && !_debounceTimer) {
+      _debounceTimer = setTimeout(_writeToDisk, DEBOUNCE_MS);
+    }
+  }
+}
+
+export async function flushState() {
+  if (_debounceTimer) {
+    clearTimeout(_debounceTimer);
+    _debounceTimer = null;
+  }
+  if (_dirty || _writing) {
+    // If a write is in progress, wait for it, then check dirty again
+    while (_writing) {
+      await new Promise(r => setTimeout(r, 10));
+    }
+    if (_dirty) {
+      await _writeToDisk();
+    }
   }
 }
 
@@ -315,3 +358,28 @@ export function getTaskQueuePosition(taskId) {
   }
   return null;
 }
+
+// --- Graceful shutdown: flush pending state ---
+
+process.on('beforeExit', async () => {
+  await flushState();
+});
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, async () => {
+    await flushState();
+    process.exit(0);
+  });
+}
+
+// Synchronous last-resort fallback — if somehow still dirty at exit
+process.on('exit', () => {
+  if (_dirty) {
+    try {
+      mkdirSync(DATA_DIR, { recursive: true });
+      writeFileSync(DATA_FILE, _serialize());
+    } catch (err) {
+      console.error('Failed to save state on exit:', err.message);
+    }
+  }
+});
