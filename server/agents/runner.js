@@ -11,6 +11,39 @@ import * as state from '../state.js';
 import { registerAgent, unregisterAgent } from '../census.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
+
+function advanceQueue(projectId) {
+  let nextTaskId;
+  while ((nextTaskId = state.dequeueTask(projectId))) {
+    const nextTask = state.getTask(nextTaskId);
+    if (nextTask && nextTask.status === 'queued') {
+      broadcast('execution:queue-advanced', {
+        projectId,
+        startedTaskId: nextTaskId,
+        queue: state.getQueue(projectId),
+      });
+      runExecution(nextTask, nextTask.executedBy).catch((advanceErr) => {
+        console.error('Queue auto-advance failed:', advanceErr.message);
+        const staleTask = state.getTask(nextTaskId);
+        if (staleTask && staleTask.status === 'queued') {
+          state.updateTask(nextTaskId, {
+            status: staleTask.plan ? 'planned' : 'proposed',
+            agentLog: `Auto-advance failed: ${advanceErr.message}`,
+          });
+          broadcast('execution:failed', {
+            taskId: nextTaskId,
+            error: `Auto-advance failed: ${advanceErr.message}`,
+            aborted: false,
+            status: staleTask.plan ? 'planned' : 'proposed',
+          });
+        }
+      });
+      return;
+    }
+    // Task was dismissed/deleted or status changed — skip it, try next
+  }
+}
+
 const GIT_POLL_MS = 10_000; // poll git status every 10s
 
 function pollGitStatus(cwd, taskId) {
@@ -292,6 +325,7 @@ export async function runExecution(task, modelId) {
     state.clearAborted(task.id);
     stopPolling();
     state.unlockProject(project.id);
+    advanceQueue(project.id);
     unregisterAgent(agentId);
   }
 }
@@ -338,6 +372,7 @@ export async function runTestSetup(project, testInfo) {
     throw err;
   } finally {
     state.unlockProject(project.id);
+    advanceQueue(project.id);
     unregisterAgent(agentId);
   }
 }

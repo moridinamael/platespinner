@@ -198,6 +198,18 @@ export default function App() {
           prev.map((t) => (t.id === data.taskId ? { ...t, status: 'queued', queuePosition: data.position } : t))
         );
         break;
+      case 'execution:queue-advanced':
+        setTasks((prev) =>
+          prev.map((t) => {
+            if (t.id === data.startedTaskId) return t; // Will be updated by execution:started
+            const idx = data.queue?.indexOf(t.id);
+            if (idx !== undefined && idx !== -1) {
+              return { ...t, queuePosition: idx + 1 };
+            }
+            return t;
+          })
+        );
+        break;
       case 'execution:dequeued':
         setTasks((prev) =>
           prev.map((t) => {

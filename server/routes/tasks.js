@@ -71,7 +71,7 @@ router.post('/tasks/:id/execute', async (req, res) => {
 
   if (state.isProjectLocked(task.projectId)) {
     // Project is busy — enqueue instead of rejecting
-    state.updateTask(task.id, { status: 'queued' });
+    state.updateTask(task.id, { status: 'queued', executedBy: modelId || null });
     const position = state.enqueueTask(task.projectId, task.id);
     broadcast('execution:queued', { taskId: task.id, position, projectId: task.projectId });
     return res.json({ message: 'Queued for execution', taskId: task.id, position });
