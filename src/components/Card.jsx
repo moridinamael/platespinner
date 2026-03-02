@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useConfirm } from '../hooks/useConfirm.js';
 
 const EFFORT_COLORS = {
   small: '#4ade80',
@@ -73,6 +74,8 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
     ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
     : `${elapsed}s`;
 
+  const [confirmingDismiss, armDismiss, resetDismiss] = useConfirm();
+
   const modelLabel = getModelLabel(task, models);
   const modelProvider = getModelProvider(task, models);
 
@@ -84,8 +87,20 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
           <span className="queue-position-badge">#{queuePosition} in queue</span>
         )}
         {(isProposed || isPlanned || isPlanning || isQueued) && (
-          <button className="card-dismiss" onClick={(e) => { e.stopPropagation(); onDismiss(task.id); }} title={isPlanning ? 'Cancel' : 'Dismiss'}>
-            &times;
+          <button
+            className={`card-dismiss${confirmingDismiss ? ' confirming' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirmingDismiss) {
+                resetDismiss();
+                onDismiss(task.id);
+              } else {
+                armDismiss();
+              }
+            }}
+            title={confirmingDismiss ? 'Click again to confirm' : (isPlanning ? 'Cancel' : 'Dismiss')}
+          >
+            {confirmingDismiss ? 'Sure?' : '\u00d7'}
           </button>
         )}
       </div>

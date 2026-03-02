@@ -28,6 +28,8 @@ export default function Sidebar({
   const [railwayInput, setRailwayInput] = useState('');
   const [checkingRailwayMap, setCheckingRailwayMap] = useState({});
   const [railwayResultMap, setRailwayResultMap] = useState({});
+  const [confirmingProjectId, setConfirmingProjectId] = useState(null);
+  const confirmTimerRef = useRef(null);
 
   const testStatus = testStatusMap[selectedProjectId];
   const testing = !!testStatus?.running;
@@ -90,6 +92,8 @@ export default function Sidebar({
       }
     }
   }, [projects]);
+
+  useEffect(() => () => clearTimeout(confirmTimerRef.current), []);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -257,14 +261,22 @@ export default function Sidebar({
               <span className="project-name">{p.name}</span>
             </button>
             <button
-              className="project-remove"
+              className={`project-remove${confirmingProjectId === p.id ? ' confirming' : ''}`}
               onClick={(e) => {
                 e.stopPropagation();
-                onRemoveProject(p.id);
+                if (confirmingProjectId === p.id) {
+                  clearTimeout(confirmTimerRef.current);
+                  setConfirmingProjectId(null);
+                  onRemoveProject(p.id);
+                } else {
+                  setConfirmingProjectId(p.id);
+                  clearTimeout(confirmTimerRef.current);
+                  confirmTimerRef.current = setTimeout(() => setConfirmingProjectId(null), 3000);
+                }
               }}
-              title="Remove project"
+              title={confirmingProjectId === p.id ? 'Click again to confirm' : 'Remove project'}
             >
-              &times;
+              {confirmingProjectId === p.id ? 'Sure?' : '\u00d7'}
             </button>
           </div>
           );

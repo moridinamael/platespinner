@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useConfirm } from '../hooks/useConfirm.js';
 
 const EFFORT_COLORS = {
   small: '#4ade80',
@@ -35,6 +36,9 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
   // Default model: same as generating model, or first available
   const defaultModelId = task.generatedBy || (models?.[0]?.id) || 'claude-opus-4-6';
   const [selectedModelId, setSelectedModelId] = useState(defaultModelId);
+  const [confirmingDismiss, armDismiss, resetDismiss] = useConfirm();
+
+  useEffect(() => { resetDismiss(); }, [task?.id]);
 
   // Resolve model labels for display
   const generatedByLabel = getModelLabel(task.generatedBy, models);
@@ -135,8 +139,14 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
             <button className="btn btn-plan" onClick={() => { onPlan(task.id, selectedModelId); onClose(); }}>
               Plan
             </button>
-            <button className="btn btn-dismiss" onClick={() => { onDismiss(task.id); onClose(); }}>
-              Dismiss
+            <button
+              className={`btn btn-dismiss${confirmingDismiss ? ' confirming' : ''}`}
+              onClick={() => {
+                if (confirmingDismiss) { resetDismiss(); onDismiss(task.id); onClose(); }
+                else { armDismiss(); }
+              }}
+            >
+              {confirmingDismiss ? 'Are you sure?' : 'Dismiss'}
             </button>
           </div>
         )}
@@ -155,16 +165,28 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
             <button className="btn btn-execute" onClick={() => { onExecute(task.id, selectedModelId); onClose(); }}>
               Execute
             </button>
-            <button className="btn btn-dismiss" onClick={() => { onDismiss(task.id); onClose(); }}>
-              Dismiss
+            <button
+              className={`btn btn-dismiss${confirmingDismiss ? ' confirming' : ''}`}
+              onClick={() => {
+                if (confirmingDismiss) { resetDismiss(); onDismiss(task.id); onClose(); }
+                else { armDismiss(); }
+              }}
+            >
+              {confirmingDismiss ? 'Are you sure?' : 'Dismiss'}
             </button>
           </div>
         )}
 
         {isPlanning && (
           <div className="modal-actions">
-            <button className="btn btn-dismiss" onClick={() => { onDismiss(task.id); onClose(); }}>
-              Cancel Planning
+            <button
+              className={`btn btn-dismiss${confirmingDismiss ? ' confirming' : ''}`}
+              onClick={() => {
+                if (confirmingDismiss) { resetDismiss(); onDismiss(task.id); onClose(); }
+                else { armDismiss(); }
+              }}
+            >
+              {confirmingDismiss ? 'Are you sure?' : 'Cancel Planning'}
             </button>
           </div>
         )}
@@ -175,8 +197,14 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
             <button className="btn btn-abort" onClick={() => { onDequeue(task.id); onClose(); }}>
               Dequeue
             </button>
-            <button className="btn btn-dismiss" onClick={() => { onDismiss(task.id); onClose(); }}>
-              Dismiss
+            <button
+              className={`btn btn-dismiss${confirmingDismiss ? ' confirming' : ''}`}
+              onClick={() => {
+                if (confirmingDismiss) { resetDismiss(); onDismiss(task.id); onClose(); }
+                else { armDismiss(); }
+              }}
+            >
+              {confirmingDismiss ? 'Are you sure?' : 'Dismiss'}
             </button>
           </div>
         )}

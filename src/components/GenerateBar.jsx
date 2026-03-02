@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useConfirm } from '../hooks/useConfirm.js';
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -52,7 +53,11 @@ You MUST wrap your output in XML tags exactly like this:
 Do NOT make any code changes. Only propose tasks as structured JSON above.`;
 
   const [formContent, setFormContent] = useState(defaultContent);
+  const [oneOffContent, setOneOffContent] = useState(defaultContent);
+  const [showOneOff, setShowOneOff] = useState(false);
+  const [confirmingDelete, armDelete, resetDelete] = useConfirm();
   const formRef = useRef(null);
+  const oneOffRef = useRef(null);
   const generatingIds = Object.keys(generatingMap);
   const isGenerating = generatingIds.length > 0;
 
@@ -65,15 +70,21 @@ Do NOT make any code changes. Only propose tasks as structured JSON above.`;
 
   // Close form on outside click
   useEffect(() => {
-    if (!showForm) return;
+    if (!showForm && !showOneOff) return;
     function handleClick(e) {
-      if (formRef.current && !formRef.current.contains(e.target)) {
+      if (showForm && formRef.current && !formRef.current.contains(e.target)) {
         setShowForm(false);
+      }
+      if (showOneOff && oneOffRef.current && !oneOffRef.current.contains(e.target)) {
+        setShowOneOff(false);
+        onSelectTemplate(selectedTemplateId === '__oneoff__' ? 'builtin:pareto-simple' : selectedTemplateId);
       }
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [showForm]);
+  }, [showForm, showOneOff]);
+
+  useEffect(() => { resetDelete(); }, [selectedTemplateId]);
 
   // Is the currently-selected project (or any if "All") already generating?
   const currentlyGenerating = selectedProjectId
@@ -93,14 +104,33 @@ Do NOT make any code changes. Only propose tasks as structured JSON above.`;
     setShowForm(false);
   };
 
+  const handleSelectTemplate = (value) => {
+    if (value === '__oneoff__') {
+      setShowOneOff(true);
+      setOneOffContent(defaultContent);
+    } else {
+      setShowOneOff(false);
+    }
+    onSelectTemplate(value);
+  };
+
+  const handleOneOffGenerate = () => {
+    if (!oneOffContent.trim()) return;
+    onGenerate(selectedModelId, oneOffContent.trim());
+    setShowOneOff(false);
+    setOneOffContent(defaultContent);
+    onSelectTemplate('builtin:pareto-simple');
+  };
+
   return (
     <div className="generate-bar">
       <div className="generate-controls">
         <select
           className="select template-select"
           value={selectedTemplateId}
-          onChange={(e) => onSelectTemplate(e.target.value)}
+          onChange={(e) => handleSelectTemplate(e.target.value)}
         >
+          <option value="__oneoff__">One-off Prompt...</option>
           {templates.map((t) => (
             <option key={t.id} value={t.id}>{t.name}</option>
           ))}
@@ -116,11 +146,18 @@ Do NOT make any code changes. Only propose tasks as structured JSON above.`;
           </button>
           {selectedTemplateId && !selectedTemplateId.startsWith('builtin:') && (
             <button
-              className="btn btn-delete-template"
-              onClick={() => onDeleteTemplate(selectedTemplateId)}
-              title="Delete selected template"
+              className={`btn btn-delete-template${confirmingDelete ? ' confirming' : ''}`}
+              onClick={() => {
+                if (confirmingDelete) {
+                  resetDelete();
+                  onDeleteTemplate(selectedTemplateId);
+                } else {
+                  armDelete();
+                }
+              }}
+              title={confirmingDelete ? 'Click again to confirm' : 'Delete selected template'}
             >
-              &times;
+              {confirmingDelete ? 'Sure?' : '\u00d7'}
             </button>
           )}
         </div>
@@ -137,8 +174,8 @@ Do NOT make any code changes. Only propose tasks as structured JSON above.`;
 
         <button
           className="btn btn-generate"
-          onClick={() => onGenerate(selectedModelId)}
-          disabled={currentlyGenerating || projects.length === 0}
+          onClick={() => onGenerate(selectedModelId, null)}
+          disabled={currentlyGenerating || projects.length === 0 || showOneOff}
         >
           {currentlyGenerating ? (
             <>
@@ -170,6 +207,32 @@ Do NOT make any code changes. Only propose tasks as structured JSON above.`;
           <div className="template-form-actions">
             <button className="btn btn-primary btn-sm" onClick={handleSaveTemplate}>Save</button>
             <button className="btn btn-sm" onClick={() => setShowForm(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {showOneOff && (
+        <div className="template-form" ref={oneOffRef}>
+          <textarea
+            className="input template-textarea"
+            placeholder="Enter your one-off prompt..."
+            value={oneOffContent}
+            onChange={(e) => setOneOffContent(e.target.value)}
+            rows={8}
+            autoFocus
+          />
+          <div className="template-form-actions">
+            <button
+              className="btn btn-generate btn-sm"
+              onClick={handleOneOffGenerate}
+              disabled={currentlyGenerating || projects.length === 0}
+            >
+              {label}
+            </button>
+            <button className="btn btn-sm" onClick={() => {
+              setShowOneOff(false);
+              onSelectTemplate('builtin:pareto-simple');
+            }}>Cancel</button>
           </div>
         </div>
       )}
