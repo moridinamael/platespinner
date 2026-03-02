@@ -844,10 +844,29 @@ html, body {
 }
 
 .column-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   color: var(--text-dim);
   font-size: 14px;
   text-align: center;
   padding: 40px 20px;
+  margin: 0 4px 4px;
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.column-empty-icon {
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.column-empty-text {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-dim);
 }
 
 /* ===== Card ===== */
