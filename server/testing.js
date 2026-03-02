@@ -1,7 +1,16 @@
 import { execFile } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
+import { homedir } from 'os';
 import { join } from 'path';
 import { toWSLPath } from './paths.js';
+
+const HOME = homedir();
+const EXTRA_PATH_DIRS = [
+  `${HOME}/go/bin`,
+  `${HOME}/.cargo/bin`,
+  `${HOME}/.local/bin`,
+  `${HOME}/.npm-global/bin`,
+].join(':');
 
 /**
  * Detect which test framework a project uses.
@@ -64,6 +73,21 @@ export function detectTestFramework(projectPath) {
 }
 
 /**
+ * Validate a user-supplied test command to prevent shell injection.
+ * Rejects commands containing shell metacharacters.
+ */
+export function validateTestCommand(command) {
+  if (!command || !command.trim()) {
+    return { valid: false, reason: 'Test command cannot be empty' };
+  }
+  const dangerous = /[;|&$`()><\n\r\0]/;
+  if (dangerous.test(command)) {
+    return { valid: false, reason: 'Test command contains disallowed shell characters: ; | & $ ` ( ) > <' };
+  }
+  return { valid: true };
+}
+
+/**
  * Extract a summary line from test output for common frameworks.
  */
 function extractSummary(output, passed) {
@@ -105,6 +129,15 @@ export function runTests(project) {
     if (project.testCommand) {
       command = project.testCommand;
       description = `Manual: ${command}`;
+      const check = validateTestCommand(command);
+      if (!check.valid) {
+        return resolve({
+          passed: false,
+          summary: `Invalid test command: ${check.reason}`,
+          output: `Refused to execute: ${command}`,
+          description,
+        });
+      }
     } else {
       const detected = detectTestFramework(project.path);
       if (!detected) {
@@ -119,8 +152,9 @@ export function runTests(project) {
       description = `Auto-detected: ${detected.description}`;
     }
 
-    // Split command into shell invocation for consistent behavior
-    execFile('sh', ['-c', command], { cwd, timeout: 300000 }, (err, stdout, stderr) => {
+    // Use login shell with extra tool dirs so PATH includes go, cargo, etc.
+    const env = { ...process.env, PATH: `${EXTRA_PATH_DIRS}:${process.env.PATH || ''}` };
+    execFile('bash', ['-lc', command], { cwd, timeout: 300000, env }, (err, stdout, stderr) => {
       const output = (stdout + '\n' + stderr).trim();
       const passed = !err;
       const summary = extractSummary(output, passed);

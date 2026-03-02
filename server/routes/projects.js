@@ -3,7 +3,7 @@ import { execFile } from 'child_process';
 import * as state from '../state.js';
 import { broadcast } from '../ws.js';
 import { toWSLPath } from '../paths.js';
-import { detectTestFramework, runTests } from '../testing.js';
+import { detectTestFramework, runTests, validateTestCommand } from '../testing.js';
 import { runTestSetup } from '../agents/runner.js';
 import { MODELS } from '../models.js';
 
@@ -68,7 +68,14 @@ router.patch('/projects/:id', (req, res) => {
 
   const updates = {};
   if ('url' in req.body) updates.url = req.body.url || null;
-  if ('testCommand' in req.body) updates.testCommand = req.body.testCommand || null;
+  if ('testCommand' in req.body) {
+    const cmd = req.body.testCommand || null;
+    if (cmd) {
+      const check = validateTestCommand(cmd);
+      if (!check.valid) return res.status(400).json({ error: check.reason });
+    }
+    updates.testCommand = cmd;
+  }
   if ('railwayProject' in req.body) updates.railwayProject = req.body.railwayProject || null;
   if ('autoTestOnCommit' in req.body) updates.autoTestOnCommit = !!req.body.autoTestOnCommit;
   const updated = state.updateProject(req.params.id, updates);

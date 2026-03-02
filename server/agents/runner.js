@@ -6,7 +6,7 @@ import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, build
 import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput } from './parser.js';
 import { toWSLPath } from '../paths.js';
 import { DEFAULT_MODEL_ID } from '../models.js';
-import { runTests } from '../testing.js';
+import { runTests, validateTestCommand } from '../testing.js';
 import * as state from '../state.js';
 import { registerAgent, unregisterAgent } from '../census.js';
 
@@ -353,9 +353,12 @@ export async function runTestSetup(project, testInfo) {
     const stdout = await promise;
     const result = parseTestSetupOutput(stdout);
 
-    // If the agent reported a test command, save it on the project
+    // If the agent reported a test command, validate and save it on the project
     if (result.testCommand) {
-      state.updateProject(project.id, { testCommand: result.testCommand });
+      const check = validateTestCommand(result.testCommand);
+      if (check.valid) {
+        state.updateProject(project.id, { testCommand: result.testCommand });
+      }
     }
 
     broadcast('setup-tests:completed', {
