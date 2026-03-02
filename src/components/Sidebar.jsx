@@ -11,6 +11,9 @@ export default function Sidebar({
   setupMap,
   setupResultMap,
   onClearSetupResult,
+  onCreateFixTask,
+  testStatusMap,
+  onClearTestResult,
 }) {
   const [path, setPath] = useState('');
   const [pushing, setPushing] = useState(null);
@@ -18,14 +21,17 @@ export default function Sidebar({
   const [gitInfo, setGitInfo] = useState(null);
   const [urlInput, setUrlInput] = useState('');
 
-  // Test state — per-project maps so state survives navigation
-  const [testingMap, setTestingMap] = useState({});   // { [projectId]: true }
-  const [testResultMap, setTestResultMap] = useState({}); // { [projectId]: result }
   const [testInfo, setTestInfo] = useState(null);
   const [testCmdInput, setTestCmdInput] = useState('');
+  const [creatingFix, setCreatingFix] = useState(false);
+  const [fixCreated, setFixCreated] = useState(false);
+  const [railwayInput, setRailwayInput] = useState('');
+  const [checkingRailway, setCheckingRailway] = useState(false);
+  const [railwayResult, setRailwayResult] = useState(null);
 
-  const testing = !!testingMap[selectedProjectId];
-  const testResult = testResultMap[selectedProjectId] || null;
+  const testStatus = testStatusMap[selectedProjectId];
+  const testing = !!testStatus?.running;
+  const testResult = testStatus?.result || null;
   const settingUp = !!setupMap[selectedProjectId];
   const setupResult = setupResultMap[selectedProjectId] || null;
   const setupProgress = setupMap[selectedProjectId] || null;
@@ -39,13 +45,16 @@ export default function Sidebar({
       setUrlInput('');
       setTestInfo(null);
       setTestCmdInput('');
+      setRailwayInput('');
       return;
     }
     setUrlInput(selectedProject?.url || '');
     setTestCmdInput(selectedProject?.testCommand || '');
+    setRailwayInput(selectedProject?.railwayProject || '');
+    setRailwayResult(null);
     api.getGitStatus(selectedProjectId).then(setGitInfo).catch(() => setGitInfo(null));
     api.getTestInfo(selectedProjectId).then(setTestInfo).catch(() => setTestInfo(null));
-  }, [selectedProjectId, selectedProject?.url, selectedProject?.testCommand]);
+  }, [selectedProjectId, selectedProject?.url, selectedProject?.testCommand, selectedProject?.railwayProject]);
 
   // When setup completes, refresh test info and git status
   useEffect(() => {
@@ -88,19 +97,12 @@ export default function Sidebar({
 
   const handleRunTests = async () => {
     if (!selectedProjectId) return;
-    const projectId = selectedProjectId;
-    setTestingMap((prev) => ({ ...prev, [projectId]: true }));
-    setTestResultMap((prev) => { const next = { ...prev }; delete next[projectId]; return next; });
+    setFixCreated(false);
     try {
-      const result = await api.runTests(projectId);
-      setTestResultMap((prev) => ({ ...prev, [projectId]: result }));
-      setTimeout(() => setTestResultMap((prev) => { const next = { ...prev }; delete next[projectId]; return next; }), 10000);
-    } catch (err) {
-      const result = { passed: false, summary: err.message, output: '', description: null };
-      setTestResultMap((prev) => ({ ...prev, [projectId]: result }));
-      setTimeout(() => setTestResultMap((prev) => { const next = { ...prev }; delete next[projectId]; return next; }), 10000);
-    } finally {
-      setTestingMap((prev) => { const next = { ...prev }; delete next[projectId]; return next; });
+      await api.runTests(selectedProjectId);
+      // Status updates come via WebSocket (test-started / test-completed)
+    } catch {
+      // Only if the HTTP request itself fails (network error, 404, etc.)
     }
   };
 
@@ -109,6 +111,29 @@ export default function Sidebar({
     try {
       await api.setupTests(selectedProjectId);
     } catch { /* fire-and-forget, errors come via WS */ }
+  };
+
+  const handleRailwaySave = async () => {
+    if (!selectedProjectId) return;
+    const trimmed = railwayInput.trim();
+    if (trimmed === (selectedProject?.railwayProject || '')) return;
+    try {
+      await api.updateProject(selectedProjectId, { railwayProject: trimmed });
+    } catch { /* ignore */ }
+  };
+
+  const handleCheckRailway = async () => {
+    if (!selectedProjectId) return;
+    setCheckingRailway(true);
+    setRailwayResult(null);
+    try {
+      const result = await api.checkRailway(selectedProjectId);
+      setRailwayResult(result);
+    } catch (err) {
+      setRailwayResult({ healthy: false, message: err.message });
+    } finally {
+      setCheckingRailway(false);
+    }
   };
 
   const canRunTests = testInfo && testInfo.source !== 'none';
@@ -137,9 +162,17 @@ export default function Sidebar({
         >
           All Projects
         </button>
-        {projects.map((p) => (
+        {projects.map((p) => {
+          const ts = testStatusMap[p.id];
+          const dotClass = ts?.running
+            ? 'test-dot test-dot-running'
+            : ts?.result
+              ? ts.result.passed ? 'test-dot test-dot-pass' : 'test-dot test-dot-fail'
+              : '';
+          return (
           <div key={p.id} className={`project-item ${selectedProjectId === p.id ? 'active' : ''}`}>
             <button className="project-btn" onClick={() => onSelectProject(p.id)}>
+              {dotClass && <span className={dotClass} />}
               <span className="project-name">{p.name}</span>
             </button>
             <button
@@ -153,33 +186,48 @@ export default function Sidebar({
               &times;
             </button>
           </div>
-        ))}
+          );
+        })}
       </nav>
 
       {selectedProjectId && (
         <div className="sidebar-project-settings">
-          <div className="url-field">
+          <label className="setting-field">
+            <span className="setting-label">Preview URL</span>
             <input
               type="text"
               className="input input-sm"
-              placeholder="Preview URL (e.g. http://localhost:3000)"
+              placeholder="http://localhost:3000"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
               onBlur={() => onUpdateProjectUrl(selectedProjectId, urlInput)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.target.blur(); } }}
             />
-          </div>
-          <div className="test-cmd-field">
+          </label>
+          <label className="setting-field">
+            <span className="setting-label">Test Command</span>
             <input
               type="text"
               className="input input-sm"
-              placeholder="Test command (e.g. npm test)"
+              placeholder="npm test"
               value={testCmdInput}
               onChange={(e) => setTestCmdInput(e.target.value)}
               onBlur={handleTestCmdSave}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.target.blur(); } }}
             />
-          </div>
+          </label>
+          <label className="setting-field">
+            <span className="setting-label">Railway Project</span>
+            <input
+              type="text"
+              className="input input-sm"
+              placeholder="my-railway-project"
+              value={railwayInput}
+              onChange={(e) => setRailwayInput(e.target.value)}
+              onBlur={handleRailwaySave}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.target.blur(); } }}
+            />
+          </label>
         </div>
       )}
 
@@ -247,6 +295,50 @@ export default function Sidebar({
                   <pre>{testResult.output}</pre>
                 </details>
               )}
+              {!testResult.passed && (
+                <button
+                  className="btn btn-fix-tests"
+                  disabled={creatingFix || fixCreated}
+                  onClick={async () => {
+                    setCreatingFix(true);
+                    try {
+                      await onCreateFixTask(selectedProjectId, testResult.summary, testResult.output);
+                      setFixCreated(true);
+                    } finally {
+                      setCreatingFix(false);
+                    }
+                  }}
+                >
+                  {creatingFix ? (
+                    <><span className="spinner spinner-sm" /> Creating...</>
+                  ) : fixCreated ? (
+                    '\u2713 Task Created'
+                  ) : (
+                    'Create Fix Task'
+                  )}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {selectedProjectId && selectedProject?.railwayProject && (
+        <div className="sidebar-railway">
+          <button
+            className="btn btn-railway"
+            onClick={handleCheckRailway}
+            disabled={checkingRailway}
+          >
+            {checkingRailway ? (
+              <><span className="spinner spinner-sm" /> Checking...</>
+            ) : (
+              'Check Railway'
+            )}
+          </button>
+          {railwayResult && (
+            <div className={`railway-result ${railwayResult.healthy ? 'railway-ok' : 'railway-fail'}`}>
+              {railwayResult.healthy ? '\u2713' : '\u2717'} {railwayResult.message}
             </div>
           )}
         </div>

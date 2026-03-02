@@ -20,6 +20,8 @@ export default function App() {
   const [execStartTimes, setExecStartTimes] = useState({});
   // Per-task planning start times: Map<taskId, timestamp>
   const [planStartTimes, setPlanStartTimes] = useState({});
+  // Per-project test status: Map<projectId, { running: boolean, result?: { passed, summary, output } }>
+  const [testStatusMap, setTestStatusMap] = useState({});
   const [statusMessage, setStatusMessage] = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
   const [templates, setTemplates] = useState([]);
@@ -200,7 +202,20 @@ export default function App() {
         setStatusMessage(data.aborted ? 'Task aborted' : `Execution failed: ${data.error}`);
         setTimeout(() => setStatusMessage(null), 5000);
         break;
-      case 'project:tested':
+      case 'project:test-started':
+        setTestStatusMap((prev) => ({
+          ...prev,
+          [data.projectId]: { running: true },
+        }));
+        break;
+      case 'project:test-completed':
+        setTestStatusMap((prev) => ({
+          ...prev,
+          [data.projectId]: {
+            running: false,
+            result: { passed: data.passed, summary: data.summary, output: data.output },
+          },
+        }));
         break;
       case 'setup-tests:started':
         setSetupMap((prev) => ({
@@ -367,6 +382,8 @@ export default function App() {
         setupResultMap={setupResultMap}
         onClearSetupResult={(id) => setSetupResultMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
         onCreateFixTask={handleCreateFixTask}
+        testStatusMap={testStatusMap}
+        onClearTestResult={(id) => setTestStatusMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
       />
       <main className="main">
         <GenerateBar
