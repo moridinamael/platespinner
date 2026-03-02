@@ -66,6 +66,11 @@ export default function App() {
         break;
       case 'task:dismissed':
         setTasks((prev) => prev.filter((t) => t.id !== data.id));
+        setPlanStartTimes((prev) => {
+          const next = { ...prev };
+          delete next[data.id];
+          return next;
+        });
         break;
 
       // --- Per-project generation ---
@@ -269,9 +274,9 @@ export default function App() {
     }
   };
 
-  const handleGenerate = async (modelId) => {
+  const handleGenerate = async (modelId, promptContent) => {
     try {
-      await api.generate(selectedProjectId, selectedTemplateId, modelId);
+      await api.generate(selectedProjectId, selectedTemplateId, modelId, promptContent);
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
     }
@@ -325,6 +330,15 @@ export default function App() {
     }
   };
 
+  const handleCreateFixTask = async (projectId, summary, output) => {
+    try {
+      await api.createFixTask(projectId, { summary, output });
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  };
+
   const filteredTasks = selectedProjectId
     ? tasks.filter((t) => t.projectId === selectedProjectId)
     : tasks;
@@ -343,6 +357,7 @@ export default function App() {
         setupMap={setupMap}
         setupResultMap={setupResultMap}
         onClearSetupResult={(id) => setSetupResultMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
+        onCreateFixTask={handleCreateFixTask}
       />
       <main className="main">
         <GenerateBar

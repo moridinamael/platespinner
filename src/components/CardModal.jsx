@@ -26,6 +26,7 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
   if (!task) return null;
 
   const isProposed = task.status === 'proposed';
+  const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
   const isDone = task.status === 'done';
 
@@ -151,6 +152,17 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
             </select>
             <button className="btn btn-execute" onClick={() => { onExecute(task.id, selectedModelId); onClose(); }}>
               Execute
+            </button>
+            <button className="btn btn-dismiss" onClick={() => { onDismiss(task.id); onClose(); }}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {isPlanning && (
+          <div className="modal-actions">
+            <button className="btn btn-dismiss" onClick={() => { onDismiss(task.id); onClose(); }}>
+              Cancel Planning
             </button>
           </div>
         )}

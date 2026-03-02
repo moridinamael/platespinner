@@ -11,7 +11,7 @@ router.get('/tasks', (req, res) => {
 });
 
 router.post('/generate', async (req, res) => {
-  const { projectId, templateId, modelId } = req.body;
+  const { projectId, templateId, modelId, promptContent } = req.body;
   let projects;
 
   if (projectId) {
@@ -31,7 +31,7 @@ router.post('/generate', async (req, res) => {
 
   // Run generation for all projects concurrently (read-only, safe)
   const results = await Promise.allSettled(
-    projects.map((p) => runGeneration(p, templateId, modelId))
+    projects.map((p) => runGeneration(p, templateId, modelId, promptContent))
   );
 
   for (const r of results) {
@@ -86,6 +86,13 @@ router.post('/tasks/:id/execute', async (req, res) => {
 router.post('/tasks/:id/dismiss', (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  // Kill running agent subprocess if task is mid-planning
+  const proc = state.getProcess(req.params.id);
+  if (proc) {
+    proc.kill('SIGTERM');
+    state.removeProcess(req.params.id);
+  }
 
   state.removeTask(req.params.id);
   broadcast('task:dismissed', { id: req.params.id });

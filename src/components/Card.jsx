@@ -79,8 +79,8 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
     <div className={`card card-${task.status}`} onClick={() => onSelect(task)} style={{ cursor: 'pointer' }}>
       <div className="card-header">
         <span className="card-title">{task.title}</span>
-        {isProposed && (
-          <button className="card-dismiss" onClick={(e) => { e.stopPropagation(); onDismiss(task.id); }} title="Dismiss">
+        {(isProposed || isPlanned || isPlanning) && (
+          <button className="card-dismiss" onClick={(e) => { e.stopPropagation(); onDismiss(task.id); }} title={isPlanning ? 'Cancel' : 'Dismiss'}>
             &times;
           </button>
         )}

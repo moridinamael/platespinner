@@ -1,4 +1,5 @@
-import { spawn, execFile } from 'child_process';
+import { spawn, execFile, execFileSync } from 'child_process';
+import { homedir } from 'os';
 import { broadcast } from '../ws.js';
 import { buildGenerationCommand, buildExecutionCommand, buildTestSetupCommand } from './cli.js';
 import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, buildTestSetupPrompt, getBuiltInTemplates } from './prompts.js';
@@ -37,14 +38,38 @@ function pollGitStatus(cwd, taskId) {
   return () => clearInterval(interval);
 }
 
-// Clean env: remove CLAUDECODE to allow nested sessions
+// Get full login-shell PATH (includes ~/.bashrc, Windows PATH in WSL, etc.)
+let _loginPath;
+function getLoginPath() {
+  if (_loginPath !== undefined) return _loginPath;
+  try {
+    _loginPath = execFileSync('bash', ['-lc', 'echo $PATH'], { timeout: 5000 }).toString().trim();
+  } catch {
+    _loginPath = null;
+  }
+  return _loginPath;
+}
+
+// Extra tool directories that may not be in shell configs
+const HOME = homedir();
+const EXTRA_PATH_DIRS = [
+  `${HOME}/go/bin`,
+  `${HOME}/.cargo/bin`,
+  `${HOME}/.local/bin`,
+  `${HOME}/.npm-global/bin`,
+].join(':');
+
+// Clean env: remove CLAUDECODE to allow nested sessions, merge login PATH + extra dirs
 function cleanEnv() {
   const env = { ...process.env };
   delete env.CLAUDECODE;
+  const loginPath = getLoginPath();
+  const basePath = loginPath || env.PATH || '';
+  env.PATH = `${EXTRA_PATH_DIRS}:${basePath}`;
   return env;
 }
 
-function spawnAgent(cmd, args, cwd, stdinData, onProgress) {
+function spawnAgent(cmd, args, cwd, stdinData, onProgress, onSpawn) {
   cwd = toWSLPath(cwd);
   return new Promise((resolve, reject) => {
     let stdout = '';
@@ -54,6 +79,8 @@ function spawnAgent(cmd, args, cwd, stdinData, onProgress) {
       cwd,
       env: cleanEnv(),
     });
+
+    if (onSpawn) onSpawn(proc);
 
     const timer = setTimeout(() => {
       proc.kill('SIGTERM');
@@ -101,9 +128,9 @@ function resolveTemplateContent(templateId) {
   return undefined;
 }
 
-export async function runGeneration(project, templateId, modelId) {
+export async function runGeneration(project, templateId, modelId, promptContent) {
   modelId = modelId || DEFAULT_MODEL_ID;
-  const skillContent = resolveTemplateContent(templateId);
+  const skillContent = promptContent || resolveTemplateContent(templateId);
   const prompt = buildGenerationPrompt(project.path, skillContent);
   const { cmd, args, useStdin } = buildGenerationCommand(modelId, prompt);
 
@@ -172,7 +199,8 @@ export async function runPlanning(task, modelId) {
     const stdout = await spawnAgent(
       cmd, args, project.path,
       useStdin ? prompt : null,
-      (bytes) => { broadcast('planning:progress', { taskId: task.id, bytesReceived: bytes }); }
+      (bytes) => { broadcast('planning:progress', { taskId: task.id, bytesReceived: bytes }); },
+      (proc) => { state.setProcess(task.id, proc); }
     );
     const plan = parsePlanningOutput(stdout);
 
@@ -181,9 +209,14 @@ export async function runPlanning(task, modelId) {
 
     return updated;
   } catch (err) {
-    state.updateTask(task.id, { status: 'proposed', agentLog: err.message });
-    broadcast('planning:failed', { taskId: task.id, error: err.message });
+    // Task may have been dismissed while planning — skip updates if removed
+    if (state.getTask(task.id)) {
+      state.updateTask(task.id, { status: 'proposed', agentLog: err.message });
+      broadcast('planning:failed', { taskId: task.id, error: err.message });
+    }
     throw err;
+  } finally {
+    state.removeProcess(task.id);
   }
 }
 
