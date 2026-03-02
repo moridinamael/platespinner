@@ -19,6 +19,7 @@
   --accent: #6c8aff;
   --accent-hover: #8ba3ff;
   --green: #4ade80;
+  --green-hover: #6ee7a0;
   --yellow: #facc15;
   --red: #f87171;
   --orange: #fb923c;
@@ -99,6 +100,10 @@ html, body {
   border-color: var(--accent);
 }
 
+.input:focus-visible, .select:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
 .input::placeholder {
   color: var(--text-dim);
 }
@@ -124,6 +129,15 @@ html, body {
   cursor: not-allowed;
 }
 
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
 .btn-primary {
   background: var(--accent);
   color: #fff;
@@ -142,7 +156,7 @@ html, body {
 }
 
 .btn-generate:hover:not(:disabled) {
-  filter: brightness(1.1);
+  background: linear-gradient(135deg, var(--accent-hover), #b9a4fc);
 }
 
 .btn-sm {
@@ -155,8 +169,8 @@ html, body {
   color: #fff;
 }
 
-.btn-plan:hover {
-  filter: brightness(1.1);
+.btn-plan:hover:not(:disabled) {
+  background: var(--accent-hover);
 }
 
 .btn-execute {
@@ -164,8 +178,8 @@ html, body {
   color: #0f1117;
 }
 
-.btn-execute:hover {
-  filter: brightness(1.1);
+.btn-execute:hover:not(:disabled) {
+  background: var(--green-hover);
 }
 
 /* ===== Project List ===== */
@@ -198,6 +212,11 @@ html, body {
 .project-item.active {
   background: var(--surface-3);
   color: var(--text);
+}
+
+.project-item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
 .project-btn {
@@ -234,6 +253,12 @@ html, body {
 
 .project-remove:hover {
   color: var(--red);
+}
+
+.project-remove:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  border-radius: var(--radius-sm);
 }
 
 /* ===== Sidebar Git Section ===== */
@@ -432,6 +457,12 @@ html, body {
 
 .setup-result-dismiss:hover {
   opacity: 1;
+}
+
+.setup-result-dismiss:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  border-radius: var(--radius-sm);
 }
 
 .setup-commit {
@@ -701,6 +732,15 @@ html, body {
   border-bottom-color: var(--accent);
 }
 
+.tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+.tab:active {
+  transform: scale(0.97);
+}
+
 /* ===== Preview Iframe ===== */
 .preview-container {
   flex: 1;
@@ -875,6 +915,12 @@ html, body {
 
 .card-dismiss:hover {
   color: var(--red);
+}
+
+.card-dismiss:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  border-radius: var(--radius-sm);
 }
 
 .card-description {
@@ -1085,6 +1131,12 @@ html, body {
 
 .modal-close:hover {
   color: var(--text);
+}
+
+.modal-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  border-radius: var(--radius-sm);
 }
 
 .modal-meta {
