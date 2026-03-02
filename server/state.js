@@ -37,6 +37,23 @@ function load() {
     for (const t of data.tasks || []) tasks.set(t.id, t);
     for (const pt of data.promptTemplates || []) promptTemplates.set(pt.id, pt);
     console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from disk`);
+
+    // Recover tasks stuck in transient states from a previous server crash
+    let recovered = 0;
+    for (const t of tasks.values()) {
+      if (t.status === 'executing') {
+        t.status = t.plan ? 'planned' : 'proposed';
+        t.agentLog = (t.agentLog ? t.agentLog + '\n' : '') + '[Server restarted — execution was interrupted]';
+        recovered++;
+      } else if (t.status === 'planning') {
+        t.status = 'proposed';
+        recovered++;
+      }
+    }
+    if (recovered > 0) {
+      console.log(`Recovered ${recovered} task(s) stuck in transient states`);
+      save();
+    }
   } catch {
     // No file yet or corrupt — start fresh
   }
@@ -158,6 +175,20 @@ export function getProcess(taskId) {
 
 export function removeProcess(taskId) {
   runningProcesses.delete(taskId);
+}
+
+const abortedTasks = new Set();
+
+export function markAborted(taskId) {
+  abortedTasks.add(taskId);
+}
+
+export function wasAborted(taskId) {
+  return abortedTasks.has(taskId);
+}
+
+export function clearAborted(taskId) {
+  abortedTasks.delete(taskId);
 }
 
 export function lockProject(projectId) {

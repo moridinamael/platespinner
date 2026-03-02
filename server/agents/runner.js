@@ -69,19 +69,17 @@ function cleanEnv() {
   return env;
 }
 
-function spawnAgent(cmd, args, cwd, stdinData, onProgress, onSpawn) {
+function spawnAgent(cmd, args, cwd, stdinData, onProgress) {
   cwd = toWSLPath(cwd);
-  return new Promise((resolve, reject) => {
-    let stdout = '';
-    let stderr = '';
+  let stdout = '';
+  let stderr = '';
 
-    const proc = spawn(cmd, args, {
-      cwd,
-      env: cleanEnv(),
-    });
+  const proc = spawn(cmd, args, {
+    cwd,
+    env: cleanEnv(),
+  });
 
-    if (onSpawn) onSpawn(proc);
-
+  const promise = new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       proc.kill('SIGTERM');
       reject(new Error(`Agent timed out after ${TIMEOUT_MS / 1000}s`));
@@ -115,6 +113,8 @@ function spawnAgent(cmd, args, cwd, stdinData, onProgress, onSpawn) {
       reject(err);
     });
   });
+
+  return { proc, promise };
 }
 
 function resolveTemplateContent(templateId) {
@@ -137,11 +137,12 @@ export async function runGeneration(project, templateId, modelId, promptContent)
   broadcast('generation:started', { projectId: project.id });
 
   try {
-    const stdout = await spawnAgent(
+    const { promise } = spawnAgent(
       cmd, args, project.path,
       useStdin ? prompt : null,
       (bytes) => { broadcast('generation:progress', { projectId: project.id, bytesReceived: bytes }); }
     );
+    const stdout = await promise;
     const proposals = parseGenerationOutput(stdout);
 
     // Dedup: skip proposals whose title matches an existing task for this project
@@ -195,13 +196,15 @@ export async function runPlanning(task, modelId) {
   state.updateTask(task.id, { status: 'planning' });
   broadcast('planning:started', { taskId: task.id });
 
+  const { proc, promise } = spawnAgent(
+    cmd, args, project.path,
+    useStdin ? prompt : null,
+    (bytes) => { broadcast('planning:progress', { taskId: task.id, bytesReceived: bytes }); }
+  );
+  state.setProcess(task.id, proc);
+
   try {
-    const stdout = await spawnAgent(
-      cmd, args, project.path,
-      useStdin ? prompt : null,
-      (bytes) => { broadcast('planning:progress', { taskId: task.id, bytesReceived: bytes }); },
-      (proc) => { state.setProcess(task.id, proc); }
-    );
+    const stdout = await promise;
     const plan = parsePlanningOutput(stdout);
 
     const updated = state.updateTask(task.id, { status: 'planned', plan, plannedBy: modelId });
@@ -237,12 +240,16 @@ export async function runExecution(task, modelId) {
 
   const stopPolling = pollGitStatus(toWSLPath(project.path), task.id);
 
+  const { proc, promise } = spawnAgent(
+    cmd, args, project.path,
+    useStdin ? prompt : null,
+    (bytes) => { broadcast('execution:progress', { taskId: task.id, bytesReceived: bytes }); }
+  );
+
+  state.setProcess(task.id, { proc, stopPolling });
+
   try {
-    const stdout = await spawnAgent(
-      cmd, args, project.path,
-      useStdin ? prompt : null,
-      (bytes) => { broadcast('execution:progress', { taskId: task.id, bytesReceived: bytes }); }
-    );
+    const stdout = await promise;
     const result = parseExecutionOutput(stdout);
 
     const updates = {
@@ -256,10 +263,15 @@ export async function runExecution(task, modelId) {
 
     return updated;
   } catch (err) {
-    state.updateTask(task.id, { status: 'proposed', agentLog: err.message });
-    broadcast('execution:failed', { taskId: task.id, error: err.message });
-    throw err;
+    const aborted = state.wasAborted(task.id);
+    const revertStatus = aborted && task.plan ? 'planned' : 'proposed';
+    const agentLog = aborted ? 'Aborted by user' : err.message;
+    state.updateTask(task.id, { status: revertStatus, agentLog });
+    broadcast('execution:failed', { taskId: task.id, error: agentLog, aborted, status: revertStatus });
+    if (!aborted) throw err;
   } finally {
+    state.removeProcess(task.id);
+    state.clearAborted(task.id);
     stopPolling();
     state.unlockProject(project.id);
   }
@@ -276,11 +288,12 @@ export async function runTestSetup(project, testInfo) {
   broadcast('setup-tests:started', { projectId: project.id });
 
   try {
-    const stdout = await spawnAgent(
+    const { promise } = spawnAgent(
       cmd, args, project.path,
       useStdin ? prompt : null,
       (bytes) => { broadcast('setup-tests:progress', { projectId: project.id, bytesReceived: bytes }); }
     );
+    const stdout = await promise;
     const result = parseTestSetupOutput(stdout);
 
     // If the agent reported a test command, save it on the project

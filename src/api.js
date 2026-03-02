@@ -26,21 +26,24 @@ export const api = {
   createTemplate: (data) => request('POST', '/templates', data),
   deleteTemplate: (id) => request('DELETE', `/templates/${id}`),
   getModels: () => request('GET', '/models'),
-  generate: (projectId, templateId, modelId) => request('POST', '/generate', { projectId, templateId, modelId }),
+  generate: (projectId, templateId, modelId, promptContent) => request('POST', '/generate', { projectId, templateId, modelId, promptContent }),
   planTask: (id, modelId) => request('POST', `/tasks/${id}/plan`, { modelId }),
   executeTask: (id, modelId) => request('POST', `/tasks/${id}/execute`, { modelId }),
   dismissTask: (id) => request('POST', `/tasks/${id}/dismiss`),
+  abortTask: (id) => request('POST', `/tasks/${id}/abort`),
   pushProject: (id) => request('POST', `/projects/${id}/push`),
   getGitStatus: (id) => request('GET', `/projects/${id}/git-status`),
   getTestInfo: (id) => request('GET', `/projects/${id}/test-info`),
   runTests: (id) => request('POST', `/projects/${id}/test`),
   setupTests: (id) => request('POST', `/projects/${id}/setup-tests`),
+  createFixTask: (projectId, data) => request('POST', `/projects/${projectId}/fix-tests`, data),
+  checkRailway: (id) => request('POST', `/projects/${id}/check-railway`),
 };
 
 // WebSocket hook
 export function connectWebSocket(onMessage) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.hostname}:3001`;
+  const wsUrl = `${protocol}//${window.location.host}`;
   const ws = new WebSocket(wsUrl);
 
   ws.onmessage = (evt) => {

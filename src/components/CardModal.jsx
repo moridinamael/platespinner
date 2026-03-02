@@ -22,12 +22,13 @@ function getModelProvider(modelId, models) {
   return found ? found.provider : 'claude';
 }
 
-export default function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, models }) {
+export default function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, models }) {
   if (!task) return null;
 
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
+  const isExecuting = task.status === 'executing';
   const isDone = task.status === 'done';
 
   // Default model: same as generating model, or first available
@@ -163,6 +164,14 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
           <div className="modal-actions">
             <button className="btn btn-dismiss" onClick={() => { onDismiss(task.id); onClose(); }}>
               Cancel Planning
+            </button>
+          </div>
+        )}
+
+        {isExecuting && (
+          <div className="modal-actions">
+            <button className="btn btn-abort" onClick={() => { onAbort(task.id); onClose(); }}>
+              Abort Execution
             </button>
           </div>
         )}

@@ -51,7 +51,7 @@ function getModelProvider(task, models) {
   return 'claude';
 }
 
-export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onSelect, models }) {
+export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onSelect, models }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
@@ -143,6 +143,13 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
             <span className="progress-info">
               {elapsedStr}{task.progress > 0 ? ` · ${formatBytes(task.progress)}` : ''}
             </span>
+            <button
+              className="btn btn-sm btn-abort"
+              onClick={(e) => { e.stopPropagation(); onAbort(task.id); }}
+              title="Abort execution"
+            >
+              Abort
+            </button>
           </span>
         )}
 

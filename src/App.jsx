@@ -194,10 +194,10 @@ export default function App() {
         });
         setTasks((prev) =>
           prev.map((t) =>
-            t.id === data.taskId ? { ...t, status: 'proposed', agentLog: data.error } : t
+            t.id === data.taskId ? { ...t, status: data.status || 'proposed', agentLog: data.error } : t
           )
         );
-        setStatusMessage(`Execution failed: ${data.error}`);
+        setStatusMessage(data.aborted ? 'Task aborted' : `Execution failed: ${data.error}`);
         setTimeout(() => setStatusMessage(null), 5000);
         break;
       case 'project:tested':
@@ -330,6 +330,15 @@ export default function App() {
     }
   };
 
+  const handleAbort = async (taskId) => {
+    try {
+      await api.abortTask(taskId);
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  };
+
   const handleCreateFixTask = async (projectId, summary, output) => {
     try {
       await api.createFixTask(projectId, { summary, output });
@@ -398,6 +407,7 @@ export default function App() {
             onExecute={handleExecute}
             onPlan={handlePlan}
             onDismiss={handleDismiss}
+            onAbort={handleAbort}
             onSelectTask={setSelectedTask}
             models={models}
           />
@@ -424,6 +434,7 @@ export default function App() {
         onExecute={handleExecute}
         onPlan={handlePlan}
         onDismiss={handleDismiss}
+        onAbort={handleAbort}
         models={models}
       />
     </div>

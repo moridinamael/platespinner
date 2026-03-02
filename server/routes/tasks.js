@@ -83,6 +83,38 @@ router.post('/tasks/:id/execute', async (req, res) => {
   }
 });
 
+router.post('/tasks/:id/abort', (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  if (task.status !== 'executing') {
+    return res.status(400).json({ error: `Task is ${task.status}, not executing` });
+  }
+
+  const handle = state.getProcess(task.id);
+  if (!handle || !handle.proc) {
+    return res.json({ message: 'Task is no longer running', taskId: task.id });
+  }
+
+  state.markAborted(task.id);
+
+  try {
+    handle.proc.kill('SIGTERM');
+  } catch {
+    // Process may have already exited
+  }
+
+  // SIGKILL fallback after 5 seconds
+  setTimeout(() => {
+    try {
+      handle.proc.kill('SIGKILL');
+    } catch {
+      // Already dead, ignore
+    }
+  }, 5000);
+
+  res.json({ message: 'Abort signal sent', taskId: task.id });
+});
+
 router.post('/tasks/:id/dismiss', (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
