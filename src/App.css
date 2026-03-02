@@ -1032,6 +1032,11 @@ html, body {
   border-left: 3px solid #a78bfa;
 }
 
+.card-queued {
+  border-color: #f59e0b;
+  border-left: 3px solid #f59e0b;
+}
+
 .card-executing {
   border-color: var(--yellow);
   border-left: 3px solid var(--yellow);
@@ -1214,6 +1219,12 @@ html, body {
   align-items: center;
   gap: 6px;
   margin-left: auto;
+}
+
+.queue-badge {
+  font-size: 12px;
+  color: #f59e0b;
+  font-weight: 600;
 }
 
 /* ===== Spinner ===== */
