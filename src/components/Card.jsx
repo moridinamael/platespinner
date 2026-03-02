@@ -1,56 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
-
-const EFFORT_COLORS = {
-  small: '#4ade80',
-  medium: '#facc15',
-  large: '#f87171',
-};
-
-function formatBytes(bytes) {
-  if (!bytes) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  return `${(bytes / 1024).toFixed(1)} KB`;
-}
-
-function getModelLabel(task, models) {
-  // Show the most relevant model: executedBy for done tasks, plannedBy for planned, generatedBy for proposed
-  const modelId = task.status === 'done' && task.executedBy
-    ? task.executedBy
-    : (task.status === 'planned' || task.status === 'planning') && task.plannedBy
-      ? task.plannedBy
-      : task.generatedBy;
-
-  if (modelId && models?.length) {
-    const found = models.find((m) => m.id === modelId);
-    if (found) return found.label;
-    return modelId; // fallback to raw id
-  }
-
-  // Backwards compat: fall back to agentType for old tasks
-  if (task.agentType) {
-    return task.agentType.charAt(0).toUpperCase() + task.agentType.slice(1);
-  }
-
-  return null;
-}
-
-function getModelProvider(task, models) {
-  const modelId = task.status === 'done' && task.executedBy
-    ? task.executedBy
-    : (task.status === 'planned' || task.status === 'planning') && task.plannedBy
-      ? task.plannedBy
-      : task.generatedBy;
-
-  if (modelId && models?.length) {
-    const found = models.find((m) => m.id === modelId);
-    if (found) return found.provider;
-  }
-
-  // Backwards compat
-  if (task.agentType) return task.agentType;
-  return 'claude';
-}
+import { EFFORT_COLORS, formatBytes, getModelLabelForTask, getModelProviderForTask } from '../utils.js';
 
 export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models }) {
   const isProposed = task.status === 'proposed';
@@ -76,8 +26,8 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
 
   const [confirmingDismiss, armDismiss, resetDismiss] = useConfirm();
 
-  const modelLabel = getModelLabel(task, models);
-  const modelProvider = getModelProvider(task, models);
+  const modelLabel = getModelLabelForTask(task, models);
+  const modelProvider = getModelProviderForTask(task, models);
 
   return (
     <div className={`card card-${task.status}`} onClick={() => onSelect(task)} style={{ cursor: 'pointer' }}>

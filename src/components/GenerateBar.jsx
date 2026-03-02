@@ -1,10 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
-
-function formatBytes(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  return `${(bytes / 1024).toFixed(1)} KB`;
-}
+import { formatBytes } from '../utils.js';
 
 function formatElapsed(ms) {
   const seconds = Math.floor(ms / 1000);

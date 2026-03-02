@@ -1,27 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
-
-const EFFORT_COLORS = {
-  small: '#4ade80',
-  medium: '#facc15',
-  large: '#f87171',
-};
-
-function getModelLabel(modelId, models) {
-  if (!modelId) return null;
-  if (models?.length) {
-    const found = models.find((m) => m.id === modelId);
-    if (found) return found.label;
-    return modelId;
-  }
-  return modelId;
-}
-
-function getModelProvider(modelId, models) {
-  if (!modelId || !models?.length) return 'claude';
-  const found = models.find((m) => m.id === modelId);
-  return found ? found.provider : 'claude';
-}
+import { EFFORT_COLORS, getModelLabel, getModelProvider } from '../utils.js';
 
 export default function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, models }) {
   if (!task) return null;
