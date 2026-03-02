@@ -14,7 +14,7 @@
   --surface-3: #2d3144;
   --border: #363b4e;
   --text: #e4e6f0;
-  --text-muted: #8b90a5;
+  --text-muted: #959ab0;
   --text-dim: #5c6178;
   --accent: #6c8aff;
   --accent-hover: #8ba3ff;
@@ -305,17 +305,21 @@ html, body {
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
 
-.url-field {
+.setting-field {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 3px;
 }
 
-.test-cmd-field {
-  display: flex;
-  gap: 6px;
+.setting-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
 }
 
 .input-sm {
@@ -437,6 +441,19 @@ html, body {
   opacity: 0.8;
 }
 
+.btn-fix-tests {
+  margin-top: 6px;
+  background: rgba(251, 146, 60, 0.15);
+  color: var(--orange);
+  border: 1px solid rgba(251, 146, 60, 0.3);
+  width: 100%;
+}
+
+.btn-fix-tests:hover:not(:disabled) {
+  background: var(--orange);
+  color: #0f1117;
+}
+
 .test-output pre {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -455,6 +472,46 @@ html, body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ===== Sidebar Railway Section ===== */
+.sidebar-railway {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-railway {
+  background: var(--surface-3);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-railway:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.railway-result {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  animation: fade-in 0.2s;
+}
+
+.railway-ok {
+  color: var(--green);
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.railway-fail {
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.1);
 }
 
 /* ===== Model Badges ===== */
@@ -724,7 +781,7 @@ html, body {
   font-size: 13px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 1.2px;
   color: var(--text-muted);
 }
 
@@ -797,7 +854,7 @@ html, body {
 
 .card-title {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.3;
   color: var(--text);
 }
