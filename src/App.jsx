@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar.jsx';
 import GenerateBar from './components/GenerateBar.jsx';
 import KanbanBoard from './components/KanbanBoard.jsx';
 import CardModal from './components/CardModal.jsx';
+import PlatesSpinning from './components/PlatesSpinning.jsx';
 
 export default function App() {
   const [projects, setProjects] = useState([]);
@@ -468,6 +469,12 @@ export default function App() {
         onPlan={handlePlan}
         onDismiss={handleDismiss}
         onAbort={handleAbort}
+        models={models}
+      />
+      <PlatesSpinning
+        tasks={tasks}
+        generatingMap={generatingMap}
+        setupMap={setupMap}
         models={models}
       />
     </div>
