@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { api, connectWebSocket } from './api.js';
+import { api, WebSocketManager } from './api.js';
 import Sidebar from './components/Sidebar.jsx';
 import GenerateBar from './components/GenerateBar.jsx';
 import KanbanBoard from './components/KanbanBoard.jsx';
@@ -282,8 +282,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    wsRef.current = connectWebSocket(handleWsMessage);
-    return () => wsRef.current?.close();
+    const manager = new WebSocketManager(handleWsMessage);
+    wsRef.current = manager;
+    return () => manager.disconnect();
   }, [handleWsMessage]);
 
   const handleAddProject = async ({ name, path }) => {

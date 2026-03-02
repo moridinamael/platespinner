@@ -42,23 +42,67 @@ export const api = {
   getAgentStatus: () => request('GET', '/agents/status'),
 };
 
-// WebSocket hook
-export function connectWebSocket(onMessage) {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}`;
-  const ws = new WebSocket(wsUrl);
+// WebSocket manager — tracks connection lifecycle with backoff & cleanup
+export class WebSocketManager {
+  constructor(onMessage) {
+    this._onMessage = onMessage;
+    this._ws = null;
+    this._reconnectTimer = null;
+    this._attempt = 0;
+    this._disposed = false;
+    this._connect();
+  }
 
-  ws.onmessage = (evt) => {
-    try {
-      const { event, data } = JSON.parse(evt.data);
-      onMessage(event, data);
-    } catch { /* ignore malformed */ }
-  };
+  _getDelay() {
+    const base = Math.min(2000 * Math.pow(2, this._attempt), 30000);
+    const jitter = Math.random() * 1000;
+    return base + jitter;
+  }
 
-  ws.onclose = () => {
-    // Reconnect after 2s
-    setTimeout(() => connectWebSocket(onMessage), 2000);
-  };
+  _connect() {
+    if (this._disposed) return;
 
-  return ws;
+    // Close any existing connection before creating a new one
+    if (this._ws) {
+      this._ws.onclose = null;
+      this._ws.onmessage = null;
+      this._ws.close();
+      this._ws = null;
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      this._attempt = 0;
+    };
+
+    ws.onmessage = (evt) => {
+      try {
+        const { event, data } = JSON.parse(evt.data);
+        this._onMessage(event, data);
+      } catch { /* ignore malformed */ }
+    };
+
+    ws.onclose = () => {
+      if (this._disposed) return;
+      const delay = this._getDelay();
+      this._attempt++;
+      this._reconnectTimer = setTimeout(() => this._connect(), delay);
+    };
+
+    this._ws = ws;
+  }
+
+  disconnect() {
+    this._disposed = true;
+    clearTimeout(this._reconnectTimer);
+    if (this._ws) {
+      this._ws.onclose = null;
+      this._ws.onmessage = null;
+      this._ws.close();
+      this._ws = null;
+    }
+  }
 }
