@@ -5,6 +5,7 @@ import GenerateBar from './components/GenerateBar.jsx';
 import KanbanBoard from './components/KanbanBoard.jsx';
 import CardModal from './components/CardModal.jsx';
 import PlatesSpinning from './components/PlatesSpinning.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 export default function App() {
   const [projects, setProjects] = useState([]);
@@ -486,21 +487,23 @@ export default function App() {
 
   return (
     <div className="app">
-      <Sidebar
-        projects={projects}
-        selectedProjectId={selectedProjectId}
-        onSelectProject={(id) => { setSelectedProjectId(id); setActiveTab('board'); }}
-        onAddProject={handleAddProject}
-        onRemoveProject={handleRemoveProject}
-        onUpdateProjectUrl={handleUpdateProjectUrl}
-        setupMap={setupMap}
-        setupResultMap={setupResultMap}
-        onClearSetupResult={(id) => setSetupResultMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
-        onCreateFixTask={handleCreateFixTask}
-        testStatusMap={testStatusMap}
-        railwayStatusMap={railwayStatusMap}
-        onClearTestResult={(id) => setTestStatusMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
-      />
+      <ErrorBoundary name="Sidebar" className="error-boundary-sidebar">
+        <Sidebar
+          projects={projects}
+          selectedProjectId={selectedProjectId}
+          onSelectProject={(id) => { setSelectedProjectId(id); setActiveTab('board'); }}
+          onAddProject={handleAddProject}
+          onRemoveProject={handleRemoveProject}
+          onUpdateProjectUrl={handleUpdateProjectUrl}
+          setupMap={setupMap}
+          setupResultMap={setupResultMap}
+          onClearSetupResult={(id) => setSetupResultMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
+          onCreateFixTask={handleCreateFixTask}
+          testStatusMap={testStatusMap}
+          railwayStatusMap={railwayStatusMap}
+          onClearTestResult={(id) => setTestStatusMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
+        />
+      </ErrorBoundary>
       <main className="main">
         <GenerateBar
           generatingMap={generatingMap}
@@ -532,19 +535,21 @@ export default function App() {
           </div>
         )}
         {activeTab === 'board' ? (
-          <KanbanBoard
-            tasks={filteredTasks}
-            projects={projects}
-            execStartTimes={execStartTimes}
-            planStartTimes={planStartTimes}
-            onExecute={handleExecute}
-            onPlan={handlePlan}
-            onDismiss={handleDismiss}
-            onAbort={handleAbort}
-            onDequeue={handleDequeue}
-            onSelectTask={setSelectedTask}
-            models={models}
-          />
+          <ErrorBoundary name="Board">
+            <KanbanBoard
+              tasks={filteredTasks}
+              projects={projects}
+              execStartTimes={execStartTimes}
+              planStartTimes={planStartTimes}
+              onExecute={handleExecute}
+              onPlan={handlePlan}
+              onDismiss={handleDismiss}
+              onAbort={handleAbort}
+              onDequeue={handleDequeue}
+              onSelectTask={setSelectedTask}
+              models={models}
+            />
+          </ErrorBoundary>
         ) : (
           <div className="preview-container">
             <div className="preview-toolbar">
@@ -561,17 +566,19 @@ export default function App() {
           </div>
         )}
       </main>
-      <CardModal
-        task={selectedTask}
-        project={selectedTask ? projects.find((p) => p.id === selectedTask.projectId) : null}
-        onClose={() => setSelectedTask(null)}
-        onExecute={handleExecute}
-        onPlan={handlePlan}
-        onDismiss={handleDismiss}
-        onAbort={handleAbort}
-        onDequeue={handleDequeue}
-        models={models}
-      />
+      <ErrorBoundary name="Card Details">
+        <CardModal
+          task={selectedTask}
+          project={selectedTask ? projects.find((p) => p.id === selectedTask.projectId) : null}
+          onClose={() => setSelectedTask(null)}
+          onExecute={handleExecute}
+          onPlan={handlePlan}
+          onDismiss={handleDismiss}
+          onAbort={handleAbort}
+          onDequeue={handleDequeue}
+          models={models}
+        />
+      </ErrorBoundary>
       <PlatesSpinning
         tasks={tasks}
         generatingMap={generatingMap}
