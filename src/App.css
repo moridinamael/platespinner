@@ -1485,6 +1485,82 @@ html, body {
   word-break: break-all;
 }
 
+/* ===== Modal Edit Mode ===== */
+.modal-edit-input {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+  padding: 10px 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.modal-edit-input:focus {
+  border-color: var(--accent);
+}
+
+.modal-edit-input::placeholder {
+  color: var(--text-dim);
+}
+
+.modal-edit-textarea {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  padding: 10px 14px;
+  outline: none;
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.6;
+  transition: border-color 0.15s;
+}
+
+.modal-edit-textarea:focus {
+  border-color: var(--accent);
+}
+
+.modal-edit-textarea::placeholder {
+  color: var(--text-dim);
+}
+
+.modal-edit-textarea.modal-edit-textarea-tall {
+  min-height: 200px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.modal-edit-select {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: var(--font);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.modal-edit-select:focus {
+  border-color: var(--accent);
+}
+
+.modal-edit-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
 .modal-actions {
   display: flex;
   gap: 10px;
