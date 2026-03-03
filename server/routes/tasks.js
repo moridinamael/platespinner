@@ -19,6 +19,32 @@ router.get('/tasks/queue', (req, res) => {
   }
 });
 
+router.patch('/tasks/:id', (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  if (task.status !== 'proposed' && task.status !== 'planned') {
+    return res.status(400).json({ error: `Cannot edit task with status '${task.status}'` });
+  }
+
+  const allowedFields = ['title', 'description', 'rationale', 'effort'];
+  if (task.status === 'planned') allowedFields.push('plan');
+
+  const updates = {};
+  for (const field of allowedFields) {
+    if (req.body[field] !== undefined) {
+      updates[field] = req.body[field];
+    }
+  }
+
+  if (updates.effort && !['small', 'medium', 'large'].includes(updates.effort)) {
+    return res.status(400).json({ error: 'effort must be small, medium, or large' });
+  }
+
+  const updated = state.updateTask(req.params.id, updates);
+  broadcast('task:updated', updated);
+  res.json(updated);
+});
+
 router.post('/generate', async (req, res) => {
   const { projectId, templateId, modelId, promptContent } = req.body;
   let projects;

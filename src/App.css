@@ -1509,6 +1509,62 @@ html, body {
   animation: fade-in 0.15s;
 }
 
+/* ===== Edit Mode ===== */
+.btn-edit {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.btn-edit:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-save {
+  background: var(--green);
+  color: #0f1117;
+}
+
+.btn-save:hover:not(:disabled) {
+  background: var(--green-hover);
+}
+
+.btn-cancel {
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.modal-edit-title {
+  font-size: 20px;
+  font-weight: 700;
+  width: 100%;
+  padding: 6px 10px;
+}
+
+.modal-edit-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 15px;
+  line-height: 1.6;
+  resize: vertical;
+  font-family: var(--font);
+}
+
+.modal-edit-plan {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.modal-edit-effort {
+  font-size: 13px;
+}
+
 /* ===== Plates Spinning Indicator ===== */
 .plates-spinning {
   position: fixed;

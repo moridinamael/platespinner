@@ -114,6 +114,10 @@ export default function App() {
       case 'task:created':
         setTasks((prev) => [...prev, data]);
         break;
+      case 'task:updated':
+        setTasks((prev) => prev.map((t) => (t.id === data.id ? data : t)));
+        setSelectedTask((prev) => (prev && prev.id === data.id ? data : prev));
+        break;
       case 'task:dismissed':
         setTasks((prev) => prev.filter((t) => t.id !== data.id));
         setPlanStartTimes((prev) => {
@@ -461,6 +465,17 @@ export default function App() {
     }
   };
 
+  const handleUpdateTask = async (taskId, updates) => {
+    try {
+      const updated = await api.updateTask(taskId, updates);
+      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      setSelectedTask((prev) => (prev && prev.id === updated.id ? updated : prev));
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  };
+
   const handleDequeue = async (taskId) => {
     try {
       await api.dequeueTask(taskId);
@@ -576,6 +591,7 @@ export default function App() {
           onDismiss={handleDismiss}
           onAbort={handleAbort}
           onDequeue={handleDequeue}
+          onUpdateTask={handleUpdateTask}
           models={models}
         />
       </ErrorBoundary>

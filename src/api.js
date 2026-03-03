@@ -22,6 +22,7 @@ export const api = {
   updateProject: (id, data) => request('PATCH', `/projects/${id}`, data),
   removeProject: (id) => request('DELETE', `/projects/${id}`),
   getTasks: (projectId) => request('GET', projectId ? `/tasks?projectId=${projectId}` : '/tasks'),
+  updateTask: (id, updates) => request('PATCH', `/tasks/${id}`, updates),
   getTemplates: () => request('GET', '/templates'),
   createTemplate: (data) => request('POST', '/templates', data),
   deleteTemplate: (id) => request('DELETE', `/templates/${id}`),
