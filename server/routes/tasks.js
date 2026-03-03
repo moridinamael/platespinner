@@ -26,14 +26,16 @@ router.patch('/tasks/:id', (req, res) => {
     return res.status(400).json({ error: `Cannot edit task with status '${task.status}'` });
   }
 
-  const allowedFields = ['title', 'description', 'rationale', 'effort'];
-  if (task.status === 'planned') allowedFields.push('plan');
-
+  const EDITABLE_FIELDS = ['title', 'description', 'rationale', 'effort', 'plan'];
   const updates = {};
-  for (const field of allowedFields) {
-    if (req.body[field] !== undefined) {
+  for (const field of EDITABLE_FIELDS) {
+    if (field in req.body) {
       updates[field] = req.body[field];
     }
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: 'No editable fields provided' });
   }
 
   if (updates.effort && !['small', 'medium', 'large'].includes(updates.effort)) {
