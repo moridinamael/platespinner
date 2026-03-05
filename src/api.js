@@ -56,6 +56,8 @@ export const api = {
   startAutoclicker: (config) => request('POST', '/autoclicker/start', config),
   stopAutoclicker: () => request('POST', '/autoclicker/stop'),
   getAutoclickerStatus: () => request('GET', '/autoclicker/status'),
+  batchAction: (action, taskIds, modelId) => request('POST', '/tasks/batch', { action, taskIds, modelId }),
+  stopAll: () => request('POST', '/tasks/stop-all'),
 };
 
 // WebSocket manager — tracks connection lifecycle with backoff & cleanup

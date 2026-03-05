@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import Card from './Card.jsx';
 
-function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive }) {
+function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive, columnKey, onPlanAll, onExecuteAll }) {
   const executingTasks = tasks.filter(t => t.status !== 'queued');
   const queuedTasks = tasks.filter(t => t.status === 'queued')
     .sort((a, b) => (a.queuePosition ?? Infinity) - (b.queuePosition ?? Infinity) || (a.createdAt || 0) - (b.createdAt || 0));
@@ -12,6 +12,16 @@ function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onEx
       <div className="column-header">
         <h2>{title}</h2>
         <span className={`column-count${filterActive ? ' column-count-filtered' : ''}`}>{tasks.length}</span>
+        {columnKey === 'proposed' && tasks.some(t => t.status === 'proposed') && (
+          <button className="btn btn-plan btn-column-action" onClick={onPlanAll} title="Plan all proposed tasks">
+            Plan All
+          </button>
+        )}
+        {columnKey === 'plan' && tasks.some(t => t.status === 'planned') && (
+          <button className="btn btn-execute btn-column-action" onClick={onExecuteAll} title="Execute all planned tasks">
+            Execute All
+          </button>
+        )}
       </div>
       <div className="column-body">
         {executingTasks.map((task) => (

@@ -207,4 +207,140 @@ router.post('/tasks/:id/dismiss', (req, res) => {
   res.status(204).end();
 });
 
+// --- Batch operations ---
+
+router.post('/tasks/batch', async (req, res) => {
+  const { action, taskIds, modelId } = req.body;
+  if (!action || !Array.isArray(taskIds)) {
+    return res.status(400).json({ error: 'action and taskIds[] are required' });
+  }
+  if (!['plan', 'execute', 'dismiss'].includes(action)) {
+    return res.status(400).json({ error: 'action must be plan, execute, or dismiss' });
+  }
+  if (taskIds.length === 0) {
+    return res.json({ message: `Batch ${action}: nothing to do`, count: 0 });
+  }
+
+  if (action === 'plan') {
+    const validTasks = taskIds
+      .map(id => state.getTask(id))
+      .filter(t => t && t.status === 'proposed');
+    if (validTasks.length === 0) {
+      return res.json({ message: 'No proposed tasks to plan', count: 0 });
+    }
+    res.json({ message: 'Batch planning started', count: validTasks.length });
+
+    // Concurrency-limited planning
+    const PLAN_CONCURRENCY = 3;
+    let active = 0;
+    const queue = [...validTasks];
+
+    function runNext() {
+      while (queue.length > 0 && active < PLAN_CONCURRENCY) {
+        active++;
+        const task = queue.shift();
+        runPlanning(task, modelId)
+          .catch(err => console.error('Batch plan failed:', err.message))
+          .finally(() => { active--; runNext(); });
+      }
+    }
+    runNext();
+  } else if (action === 'execute') {
+    const validTasks = taskIds
+      .map(id => state.getTask(id))
+      .filter(t => t && (t.status === 'planned' || t.status === 'proposed'))
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    if (validTasks.length === 0) {
+      return res.json({ message: 'No tasks to execute', count: 0 });
+    }
+
+    let queued = 0;
+    let started = 0;
+
+    for (const task of validTasks) {
+      // Budget check
+      const project = state.getProject(task.projectId);
+      if (project && project.budgetLimitUsd != null) {
+        const projectTasks = state.getTasks(task.projectId);
+        const totalSpent = projectTasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
+        if (totalSpent >= project.budgetLimitUsd) continue; // skip over-budget tasks
+      }
+
+      if (state.isProjectLocked(task.projectId)) {
+        state.updateTask(task.id, { status: 'queued', executedBy: modelId || null });
+        const position = state.enqueueTask(task.projectId, task.id);
+        broadcast('execution:queued', { taskId: task.id, position, projectId: task.projectId });
+        broadcast('execution:queue-updated', state.getQueueSnapshot(task.projectId));
+        queued++;
+      } else {
+        started++;
+        // Fire and forget
+        runExecution(task, modelId).catch(err => console.error('Batch execute failed:', err.message));
+      }
+    }
+
+    res.json({ message: 'Batch execution started', count: validTasks.length, started, queued });
+  } else if (action === 'dismiss') {
+    let count = 0;
+    for (const id of taskIds) {
+      const task = state.getTask(id);
+      if (!task) continue;
+
+      const handle = state.getProcess(id);
+      if (handle) {
+        const proc = handle.proc || handle;
+        try { proc.kill('SIGTERM'); } catch { /* already dead */ }
+        state.removeProcess(id);
+      }
+
+      const projectId = task.projectId;
+      const wasQueued = task.status === 'queued';
+      state.removeTask(id);
+      broadcast('task:dismissed', { id });
+      if (wasQueued) {
+        broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
+      }
+      count++;
+    }
+    res.json({ message: 'Dismissed', count });
+  }
+});
+
+router.post('/tasks/stop-all', async (req, res) => {
+  let aborted = 0;
+
+  // Kill all running processes (executing + planning)
+  const activeTaskIds = state.getAllExecutingTaskIds();
+  for (const taskId of activeTaskIds) {
+    const handle = state.getProcess(taskId);
+    if (!handle) continue;
+
+    state.markAborted(taskId);
+    const proc = handle.proc || handle;
+    try { proc.kill('SIGTERM'); } catch { /* already dead */ }
+    // SIGKILL fallback
+    setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+    }, 5000);
+    aborted++;
+  }
+
+  // Clear all execution queues
+  const dequeuedIds = state.clearAllQueues();
+  for (const taskId of dequeuedIds) {
+    const task = state.getTask(taskId);
+    if (task) {
+      broadcast('task:updated', task);
+    }
+  }
+
+  // Stop autoclicker if running
+  try {
+    const { stopOrchestrator } = await import('../agents/autoclicker.js');
+    stopOrchestrator();
+  } catch { /* autoclicker may not be running */ }
+
+  res.json({ message: 'All stopped', aborted, dequeued: dequeuedIds.length });
+});
+
 export default router;

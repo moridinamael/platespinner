@@ -695,6 +695,44 @@ export default function App() {
     }
   };
 
+  const handlePlanAll = useCallback(async () => {
+    const proposedIds = filteredTasks
+      .filter(t => t.status === 'proposed')
+      .map(t => t.id);
+    if (proposedIds.length === 0) return;
+    try {
+      await api.batchAction('plan', proposedIds);
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  }, [filteredTasks]);
+
+  const handleExecuteAll = useCallback(async () => {
+    const plannedIds = filteredTasks
+      .filter(t => t.status === 'planned')
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+      .map(t => t.id);
+    if (plannedIds.length === 0) return;
+    try {
+      await api.batchAction('execute', plannedIds);
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  }, [filteredTasks]);
+
+  const handleStopAll = useCallback(async () => {
+    try {
+      const result = await api.stopAll();
+      setStatusMessage(`Stopped: ${result.aborted} aborted, ${result.dequeued} dequeued`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  }, []);
+
   const handleStopAutoclicker = useCallback(async () => {
     try {
       await api.stopAutoclicker();
@@ -754,6 +792,11 @@ export default function App() {
   }), [projectTasks, filters]);
 
   const filterActive = !!(filters.search || filters.efforts.length || filters.statuses.length || filters.modelId || filters.hasPlan || filters.dateFrom || filters.dateTo);
+
+  const hasActiveAgents = useMemo(() =>
+    tasks.some(t => t.status === 'executing' || t.status === 'planning' || t.status === 'queued'),
+    [tasks]
+  );
 
   // Clean up selection when filtered tasks change (remove IDs not visible)
   useEffect(() => {
@@ -892,6 +935,11 @@ export default function App() {
           onDeleteTemplate={handleDeleteTemplate}
           models={models}
         />
+        {hasActiveAgents && (
+          <button className="btn btn-stop-all" onClick={handleStopAll}>
+            Stop All
+          </button>
+        )}
         <FilterBar
           filters={filters}
           onFiltersChange={setFilters}
@@ -932,6 +980,8 @@ export default function App() {
               selectedIds={selectedIds}
               onToggleSelect={handleToggleSelect}
               filterActive={filterActive}
+              onPlanAll={handlePlanAll}
+              onExecuteAll={handleExecuteAll}
             />
             {selectedIds.size > 0 && (
               <BulkActionBar

@@ -320,6 +320,33 @@ export function removeProcess(taskId) {
   runningProcesses.delete(taskId);
 }
 
+export function getAllProcesses() {
+  return [...runningProcesses.entries()]; // returns [taskId, proc][]
+}
+
+export function getAllExecutingTaskIds() {
+  return [...tasks.values()]
+    .filter(t => t.status === 'executing' || t.status === 'planning')
+    .map(t => t.id);
+}
+
+export function clearAllQueues() {
+  const result = [];
+  for (const [projectId, queue] of executionQueues) {
+    for (const taskId of queue) {
+      const t = tasks.get(taskId);
+      if (t) {
+        t.status = t.plan ? 'planned' : 'proposed';
+        delete t.queuePosition;
+        result.push(taskId);
+      }
+    }
+  }
+  executionQueues.clear();
+  save();
+  return result;
+}
+
 const abortedTasks = new Set();
 
 export function markAborted(taskId) {
