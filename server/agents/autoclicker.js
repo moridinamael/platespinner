@@ -13,6 +13,7 @@ let activeProcessCount = 0;
 const projectCycleStatus = new Map(); // projectId → status string
 const MAX_CYCLES_PER_PROJECT = 50;
 const MAX_CONSECUTIVE_FAILURES = 3;
+const DEBUG = !!process.env.DEBUG_AUTOCLICKER;
 
 function _sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
@@ -40,6 +41,13 @@ async function _runJudgmentAgent(project, tasks, templates, gitLog, testResult) 
     const stdout = await promise;
     const extracted = extractClaudeJsonOutput(stdout);
     const decision = parseJudgmentOutput(extracted.text);
+    if (DEBUG && decision.action === 'skip') {
+      console.debug('[autoclicker] Judgment parsed as skip — reasoning:', decision.reasoning);
+      console.debug('[autoclicker] Raw stdout (first 500 chars):', stdout.slice(0, 500));
+      if (extracted.text !== stdout) {
+        console.debug('[autoclicker] Extracted agent text (first 500 chars):', extracted.text.slice(0, 500));
+      }
+    }
     decision.costData = {
       costUsd: extracted.costUsd,
       inputTokens: extracted.inputTokens,
@@ -49,6 +57,9 @@ async function _runJudgmentAgent(project, tasks, templates, gitLog, testResult) 
     };
     return decision;
   } catch (err) {
+    if (DEBUG) {
+      console.debug('[autoclicker] Judgment agent threw:', err.message);
+    }
     return { action: 'skip', reasoning: `Judgment agent failed: ${err.message}`, costData: null };
   }
 }
