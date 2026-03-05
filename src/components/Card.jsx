@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
+import { useTaskProgress } from '../hooks/useTaskProgress.js';
 import { EFFORT_COLORS, formatBytes, getModelLabelForTask, getModelProviderForTask } from '../utils.js';
 
 export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR }) {
@@ -9,6 +10,8 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
   const isQueued = task.status === 'queued';
   const isExecuting = task.status === 'executing';
   const isDone = task.status === 'done';
+
+  const progress = useTaskProgress(task.id);
 
   // Elapsed timer driven by parent-provided start time (survives unmount/remount)
   const [now, setNow] = useState(Date.now());
@@ -116,7 +119,7 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
           <span className="executing-status">
             <span className="spinner" />
             <span className="progress-info">
-              {elapsedStr}{task.progress > 0 ? ` · ${formatBytes(task.progress)}` : ''}
+              {elapsedStr}{progress?.bytesReceived > 0 ? ` · ${formatBytes(progress.bytesReceived)}` : ''}
             </span>
           </span>
         )}
@@ -144,7 +147,7 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
           <span className="executing-status">
             <span className="spinner" />
             <span className="progress-info">
-              {elapsedStr}{task.progress > 0 ? ` · ${formatBytes(task.progress)}` : ''}
+              {elapsedStr}{progress?.bytesReceived > 0 ? ` · ${formatBytes(progress.bytesReceived)}` : ''}
             </span>
             <button
               className="btn btn-sm btn-abort"
@@ -184,17 +187,17 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
         </div>
       )}
 
-      {isExecuting && (task.gitSummary || task.gitUntracked?.length > 0) && (
+      {isExecuting && (progress?.gitSummary || progress?.gitUntracked?.length > 0) && (
         <div className="card-git" onClick={(e) => e.stopPropagation()}>
-          {task.gitSummary && <div className="git-summary">{task.gitSummary}</div>}
-          {task.gitFiles?.length > 0 && (
+          {progress?.gitSummary && <div className="git-summary">{progress.gitSummary}</div>}
+          {progress?.gitFiles?.length > 0 && (
             <div className="git-files">
-              {task.gitFiles.map((f, i) => <div key={i} className="git-file">{f}</div>)}
+              {progress.gitFiles.map((f, i) => <div key={i} className="git-file">{f}</div>)}
             </div>
           )}
-          {task.gitUntracked?.length > 0 && (
+          {progress?.gitUntracked?.length > 0 && (
             <div className="git-files git-untracked">
-              {task.gitUntracked.map((f, i) => <div key={i} className="git-file">+ {f}</div>)}
+              {progress.gitUntracked.map((f, i) => <div key={i} className="git-file">+ {f}</div>)}
             </div>
           )}
         </div>

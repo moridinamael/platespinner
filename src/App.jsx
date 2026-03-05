@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react';
 import { api, WebSocketManager } from './api.js';
+import { updateProgress, clearProgress } from './progressStore.js';
 import Sidebar from './components/Sidebar.jsx';
 import GenerateBar from './components/GenerateBar.jsx';
 import FilterBar from './components/FilterBar.jsx';
@@ -139,6 +140,7 @@ export default function App() {
         setSelectedTask((prev) => (prev && prev.id === data.id ? data : prev));
         break;
       case 'task:dismissed':
+        clearProgress(data.id);
         setTasks((prev) => prev.filter((t) => t.id !== data.id));
         setPlanStartTimes((prev) => {
           const next = { ...prev };
@@ -193,19 +195,17 @@ export default function App() {
 
       // --- Planning ---
       case 'planning:started':
+        clearProgress(data.taskId);
         setPlanStartTimes((prev) => ({ ...prev, [data.taskId]: Date.now() }));
         setTasks((prev) =>
-          prev.map((t) => (t.id === data.taskId ? { ...t, status: 'planning', progress: 0 } : t))
+          prev.map((t) => (t.id === data.taskId ? { ...t, status: 'planning' } : t))
         );
         break;
       case 'planning:progress':
-        startTransition(() => {
-          setTasks((prev) =>
-            prev.map((t) => (t.id === data.taskId ? { ...t, progress: data.bytesReceived } : t))
-          );
-        });
+        updateProgress(data.taskId, { bytesReceived: data.bytesReceived });
         break;
       case 'planning:completed':
+        clearProgress(data.taskId);
         setPlanStartTimes((prev) => {
           const next = { ...prev };
           delete next[data.taskId];
@@ -214,13 +214,14 @@ export default function App() {
         setTasks((prev) =>
           prev.map((t) =>
             t.id === data.taskId
-              ? { ...t, status: 'planned', plan: data.plan, plannedBy: data.plannedBy, progress: 0,
+              ? { ...t, status: 'planned', plan: data.plan, plannedBy: data.plannedBy,
                   costUsd: data.costUsd != null ? (t.costUsd || 0) + data.costUsd : t.costUsd }
               : t
           )
         );
         break;
       case 'planning:failed':
+        clearProgress(data.taskId);
         setPlanStartTimes((prev) => {
           const next = { ...prev };
           delete next[data.taskId];
@@ -237,27 +238,20 @@ export default function App() {
 
       // --- Execution with stable start times ---
       case 'execution:started':
+        clearProgress(data.taskId);
         setExecStartTimes((prev) => ({ ...prev, [data.taskId]: Date.now() }));
         setTasks((prev) =>
-          prev.map((t) => (t.id === data.taskId ? { ...t, status: 'executing', progress: 0 } : t))
+          prev.map((t) => (t.id === data.taskId ? { ...t, status: 'executing' } : t))
         );
         break;
       case 'execution:progress':
-        startTransition(() => {
-          setTasks((prev) =>
-            prev.map((t) => (t.id === data.taskId ? { ...t, progress: data.bytesReceived } : t))
-          );
-        });
+        updateProgress(data.taskId, { bytesReceived: data.bytesReceived });
         break;
       case 'execution:git':
-        setTasks((prev) =>
-          prev.map((t) => (t.id === data.taskId ? { ...t, gitSummary: data.summary, gitFiles: data.files } : t))
-        );
+        updateProgress(data.taskId, { gitSummary: data.summary, gitFiles: data.files });
         break;
       case 'execution:git-untracked':
-        setTasks((prev) =>
-          prev.map((t) => (t.id === data.taskId ? { ...t, gitUntracked: data.files } : t))
-        );
+        updateProgress(data.taskId, { gitUntracked: data.files });
         break;
       case 'execution:queued':
         setTasks((prev) =>
@@ -299,6 +293,7 @@ export default function App() {
         }));
         break;
       case 'execution:completed':
+        clearProgress(data.taskId);
         setExecStartTimes((prev) => {
           const next = { ...prev };
           delete next[data.taskId];
@@ -316,6 +311,7 @@ export default function App() {
         );
         break;
       case 'execution:failed':
+        clearProgress(data.taskId);
         setExecStartTimes((prev) => {
           const next = { ...prev };
           delete next[data.taskId];
