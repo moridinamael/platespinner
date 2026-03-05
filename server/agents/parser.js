@@ -119,22 +119,54 @@ export function parsePlanningOutput(stdout) {
 export function parseJudgmentOutput(stdout) {
   const match = stdout.match(/<autoclicker-decision>([\s\S]*?)<\/autoclicker-decision>/);
   if (!match) {
+    // Fallback: try to find a raw JSON object with a valid action field
+    const jsonFallback = stdout.match(/\{[\s\S]*?"action"\s*:\s*"(propose|plan|execute|skip)"[\s\S]*?\}/);
+    if (jsonFallback) {
+      try {
+        const decision = JSON.parse(jsonFallback[0]);
+        return validateDecision(decision);
+      } catch { /* fall through */ }
+    }
     return { action: 'skip', reasoning: 'No decision tags found in output' };
   }
+  let raw = match[1].trim();
   try {
-    const decision = JSON.parse(match[1].trim());
-    if (!['propose', 'plan', 'execute', 'skip'].includes(decision.action)) {
-      return { action: 'skip', reasoning: `Invalid action: ${decision.action}` };
+    // Try direct parse first
+    const decision = JSON.parse(raw);
+    return validateDecision(decision);
+  } catch {
+    // Agent may have output escaped JSON (e.g. \" instead of ") — unescape and retry
+    try {
+      const unescaped = raw
+        .replace(/\\n/g, '\n')
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\');
+      const decision = JSON.parse(unescaped);
+      return validateDecision(decision);
+    } catch {
+      // Last resort: try to extract a JSON object from the content
+      const jsonMatch = raw.match(/\{[\s\S]*"action"[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const decision = JSON.parse(jsonMatch[0]);
+          return validateDecision(decision);
+        } catch { /* fall through */ }
+      }
+      return { action: 'skip', reasoning: `Failed to parse decision JSON from: ${raw.slice(0, 200)}` };
     }
-    return {
-      action: decision.action,
-      targetTaskId: decision.targetTaskId || null,
-      templateId: decision.templateId || null,
-      reasoning: decision.reasoning || 'No reasoning provided',
-    };
-  } catch (err) {
-    return { action: 'skip', reasoning: `Failed to parse decision JSON: ${err.message}` };
   }
+}
+
+function validateDecision(decision) {
+  if (!['propose', 'plan', 'execute', 'skip'].includes(decision.action)) {
+    return { action: 'skip', reasoning: `Invalid action: ${decision.action}` };
+  }
+  return {
+    action: decision.action,
+    targetTaskId: decision.targetTaskId || null,
+    templateId: decision.templateId || null,
+    reasoning: decision.reasoning || 'No reasoning provided',
+  };
 }
 
 export function parseExecutionOutput(stdout) {

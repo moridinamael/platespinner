@@ -3,6 +3,7 @@ import {
   parseGenerationOutput,
   parseTestSetupOutput,
   parsePlanningOutput,
+  parseJudgmentOutput,
   parseExecutionOutput,
 } from './parser.js';
 
@@ -36,6 +37,44 @@ describe('parsePlanningOutput', () => {
   it('returns raw content if plan tags contain non-JSON', () => {
     const input = `<implementation-plan>Step 1: do things</implementation-plan>`;
     expect(parsePlanningOutput(input)).toBe('Step 1: do things');
+  });
+});
+
+describe('parseJudgmentOutput', () => {
+  it('extracts decision from <autoclicker-decision> tags', () => {
+    const input = `<autoclicker-decision>{"action":"execute","targetTaskId":"abc-123","reasoning":"Tests pass"}</autoclicker-decision>`;
+    const result = parseJudgmentOutput(input);
+    expect(result.action).toBe('execute');
+    expect(result.targetTaskId).toBe('abc-123');
+    expect(result.reasoning).toBe('Tests pass');
+  });
+
+  it('falls back to raw JSON when tags are missing', () => {
+    const input = `Here's my decision: {"action": "execute", "targetTaskId": "abc-123", "reasoning": "Tests pass"}`;
+    const result = parseJudgmentOutput(input);
+    expect(result.action).toBe('execute');
+    expect(result.targetTaskId).toBe('abc-123');
+    expect(result.reasoning).toBe('Tests pass');
+  });
+
+  it('fallback works with surrounding conversational text', () => {
+    const input = `I've analyzed the board and here is what I think:\n\n{"action": "propose", "reasoning": "Need new tasks"}\n\nLet me know if you agree.`;
+    const result = parseJudgmentOutput(input);
+    expect(result.action).toBe('propose');
+    expect(result.reasoning).toBe('Need new tasks');
+  });
+
+  it('returns skip when no tags and no valid JSON', () => {
+    const result = parseJudgmentOutput('just some random text with no decision');
+    expect(result.action).toBe('skip');
+    expect(result.reasoning).toBe('No decision tags found in output');
+  });
+
+  it('returns skip when JSON regex matches but parse fails', () => {
+    const input = `{"action": "execute", broken json here}`;
+    const result = parseJudgmentOutput(input);
+    expect(result.action).toBe('skip');
+    expect(result.reasoning).toBe('No decision tags found in output');
   });
 });
 
