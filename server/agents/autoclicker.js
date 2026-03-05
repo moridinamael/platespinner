@@ -4,9 +4,8 @@ import { toWSLPath } from '../paths.js';
 import { DEFAULT_MODEL_ID } from '../models.js';
 import { buildGenerationCommand } from './cli.js';
 import { buildJudgmentPrompt, getBuiltInTemplates } from './prompts.js';
-import { parseJudgmentOutput } from './parser.js';
-import { runGeneration, runPlanning, runExecutionInWorktree, spawnAgent } from './runner.js';
-import { createWorktree, mergeWorktree, removeWorktree } from './worktree.js';
+import { parseJudgmentOutput, extractClaudeJsonOutput } from './parser.js';
+import { runGeneration, runPlanning, runExecution, spawnAgent } from './runner.js';
 import * as state from '../state.js';
 
 let orchestratorRunning = false;
@@ -39,29 +38,10 @@ async function _runJudgmentAgent(project, tasks, templates, gitLog, testResult) 
 
   try {
     const stdout = await promise;
-    return parseJudgmentOutput(stdout);
+    const extracted = extractClaudeJsonOutput(stdout);
+    return parseJudgmentOutput(extracted.text);
   } catch (err) {
     return { action: 'skip', reasoning: `Judgment agent failed: ${err.message}` };
-  }
-}
-
-async function _executeWithWorktree(project, task) {
-  const { worktreePath, branchName } = await createWorktree(project.path, task.id);
-  state.lockWorktree(worktreePath, task.id);
-
-  try {
-    await runExecutionInWorktree(task, DEFAULT_MODEL_ID, worktreePath);
-
-    const mergeResult = await mergeWorktree(project.path, task.id, branchName);
-    if (!mergeResult.success) {
-      state.updateTask(task.id, {
-        agentLog: (task.agentLog || '') + '\n[Autoclicker: merge conflict — manual resolution needed]',
-      });
-      broadcast('autoclicker:merge-conflict', { taskId: task.id, projectId: project.id, branchName });
-    }
-  } finally {
-    state.unlockWorktree(worktreePath);
-    await removeWorktree(project.path, task.id);
   }
 }
 
@@ -109,9 +89,17 @@ async function _runProjectCycle(project) {
     } else if (decision.action === 'execute') {
       const task = state.getTask(decision.targetTaskId);
       if (task && (task.status === 'proposed' || task.status === 'planned')) {
-        projectCycleStatus.set(project.id, 'executing');
-        broadcast('autoclicker:phase', { projectId: project.id, phase: 'executing' });
-        await _executeWithWorktree(project, task);
+        if (state.isProjectLocked(project.id)) {
+          // Project already has an execution running — queue instead
+          state.updateTask(task.id, { status: 'queued', executedBy: DEFAULT_MODEL_ID });
+          const position = state.enqueueTask(project.id, task.id);
+          broadcast('execution:queued', { taskId: task.id, position, projectId: project.id });
+          broadcast('autoclicker:phase', { projectId: project.id, phase: 'queued' });
+        } else {
+          projectCycleStatus.set(project.id, 'executing');
+          broadcast('autoclicker:phase', { projectId: project.id, phase: 'executing' });
+          await runExecution(task, DEFAULT_MODEL_ID);
+        }
       }
     }
 
