@@ -1,6 +1,7 @@
-import { useState, useEffect, memo } from 'react';
+import { memo } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { useTaskProgress } from '../hooks/useTaskProgress.js';
+import { useSharedClock } from '../hooks/useSharedClock.js';
 import { EFFORT_COLORS, formatBytes, getModelLabelForTask, getModelProviderForTask } from '../utils.js';
 
 function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR }) {
@@ -12,14 +13,7 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
   const isDone = task.status === 'done';
 
   const progress = useTaskProgress(task.id);
-
-  // Elapsed timer driven by parent-provided start time (survives unmount/remount)
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!isExecuting && !isPlanning) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [isExecuting, isPlanning]);
+  const now = useSharedClock(isExecuting || isPlanning);
 
   const activeStartTime = isPlanning ? planStartTime : execStartTime;
   const elapsed = activeStartTime ? Math.floor((now - activeStartTime) / 1000) : 0;
