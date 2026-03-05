@@ -96,7 +96,14 @@ export async function flushState() {
   }
 }
 
-function load() {
+export function load() {
+  // Clear existing state so load() is safely re-callable (needed for tests)
+  projects.clear();
+  tasks.clear();
+  promptTemplates.clear();
+  notificationSettings.clear();
+  executionQueues.clear();
+
   try {
     const raw = readFileSync(DATA_FILE, 'utf-8');
     const data = JSON.parse(raw);
