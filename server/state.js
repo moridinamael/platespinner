@@ -228,6 +228,7 @@ export function addTask({ projectId, title, description, rationale, effort, gene
     baseBranch: null,
     prUrl: null,
     agentLog: null,
+    diff: null,
     tokenUsage: null,
     costUsd: 0,
     createdAt: Date.now(),

@@ -1,13 +1,17 @@
 import { Router } from 'express';
+import { execFile } from 'child_process';
 import * as state from '../state.js';
 import { broadcast } from '../ws.js';
+import { toWSLPath } from '../paths.js';
 import { runGeneration, runExecution, runPlanning } from '../agents/runner.js';
 
 const router = Router();
 
 router.get('/tasks', (req, res) => {
   const { projectId } = req.query;
-  res.json(state.getTasks(projectId));
+  const tasks = state.getTasks(projectId);
+  // Strip diff field from list response to keep payload small
+  res.json(tasks.map(({ diff, ...rest }) => rest));
 });
 
 router.get('/tasks/queue', (req, res) => {
@@ -205,6 +209,46 @@ router.post('/tasks/:id/dismiss', (req, res) => {
     broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
   }
   res.status(204).end();
+});
+
+// --- Diff endpoint ---
+
+router.get('/tasks/:id/diff', async (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  // Return stored diff if available
+  if (task.diff) {
+    return res.json({ diff: task.diff, source: 'stored' });
+  }
+
+  // Try to compute from git if commitHash exists
+  if (task.commitHash) {
+    const project = state.getProject(task.projectId);
+    if (!project) return res.json({ diff: null, source: 'unavailable' });
+
+    const cwd = toWSLPath(project.path);
+
+    try {
+      const diff = await new Promise((resolve, reject) => {
+        execFile('git', ['diff', `${task.commitHash}~1..${task.commitHash}`],
+          { cwd, maxBuffer: 5 * 1024 * 1024 },
+          (err, stdout) => {
+            if (err) return reject(err);
+            resolve(stdout);
+          });
+      });
+      if (diff) {
+        // Cache on task for future requests
+        state.updateTask(task.id, { diff });
+      }
+      return res.json({ diff: diff || null, source: 'computed' });
+    } catch {
+      return res.json({ diff: null, source: 'unavailable' });
+    }
+  }
+
+  res.json({ diff: null, source: 'unavailable' });
 });
 
 // --- Batch operations ---

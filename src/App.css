@@ -2558,3 +2558,198 @@ html, body {
 .pr-link:hover {
   text-decoration: underline;
 }
+
+/* ===== Modal Tabs ===== */
+.modal-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.modal-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.modal-tab:hover {
+  color: var(--text);
+}
+
+.modal-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ===== Diff Viewer ===== */
+.diff-viewer {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.diff-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font);
+  font-size: 12px;
+}
+
+.diff-stats {
+  color: var(--text-muted);
+}
+
+.diff-toolbar-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.diff-additions {
+  color: var(--green);
+}
+
+.diff-deletions {
+  color: var(--red);
+}
+
+.btn-copy-diff {
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+
+.btn-copy-diff:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-revert {
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+
+.btn-revert:hover {
+  background: var(--red);
+  color: #fff;
+}
+
+.btn-revert.confirming {
+  background: var(--red);
+  color: #fff;
+}
+
+.diff-file {
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-file:last-child {
+  border-bottom: none;
+}
+
+.diff-file-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--surface-2);
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.diff-file-header:hover {
+  background: var(--surface-3);
+}
+
+.diff-file-toggle {
+  color: var(--text-dim);
+  font-size: 10px;
+  width: 12px;
+}
+
+.diff-file-name {
+  color: var(--text);
+  flex: 1;
+}
+
+.diff-file-stats {
+  font-size: 11px;
+}
+
+.diff-file-content {
+  overflow-x: auto;
+}
+
+.diff-binary {
+  padding: 8px 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.diff-hunk-header {
+  color: var(--accent);
+  background: rgba(108, 138, 255, 0.08);
+  padding: 2px 12px;
+  font-size: 11px;
+}
+
+.diff-line {
+  display: flex;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.diff-line-prefix {
+  width: 20px;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.diff-line-content {
+  flex: 1;
+  padding-right: 12px;
+}
+
+.diff-line-addition {
+  background: rgba(74, 222, 128, 0.1);
+  color: var(--green);
+}
+
+.diff-line-addition .diff-line-prefix {
+  color: var(--green);
+}
+
+.diff-line-deletion {
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--red);
+}
+
+.diff-line-deletion .diff-line-prefix {
+  color: var(--red);
+}
+
+.diff-line-context {
+  color: var(--text-muted);
+}
+
+.text-error {
+  color: var(--red);
+  font-size: 13px;
+}

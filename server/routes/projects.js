@@ -385,6 +385,31 @@ router.post('/projects/:projectId/tasks/:taskId/merge', async (req, res) => {
   }
 });
 
+// Revert a task's commit
+router.post('/projects/:projectId/tasks/:taskId/revert', async (req, res) => {
+  const project = state.getProject(req.params.projectId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const task = state.getTask(req.params.taskId);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  if (!task.commitHash) return res.status(400).json({ error: 'Task has no commit hash' });
+
+  const cwd = toWSLPath(project.path);
+
+  try {
+    await execPromise('git', ['revert', '--no-edit', task.commitHash], { cwd });
+    const revertMsg = `Reverted commit ${task.commitHash.slice(0, 7)}`;
+    state.updateTask(task.id, { reverted: true });
+    broadcast('task:updated', state.getTask(task.id));
+    res.json({ message: revertMsg });
+  } catch (err) {
+    // Abort revert if it failed (e.g., conflicts)
+    try {
+      await execPromise('git', ['revert', '--abort'], { cwd });
+    } catch { /* ignore */ }
+    res.status(500).json({ error: `Revert failed: ${err.message}` });
+  }
+});
+
 // Create a PR from a task's feature branch
 router.post('/projects/:projectId/tasks/:taskId/create-pr', async (req, res) => {
   const project = state.getProject(req.params.projectId);

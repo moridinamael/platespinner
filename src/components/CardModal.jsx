@@ -1,6 +1,8 @@
 import { useState, useEffect, memo } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
+import { api } from '../api.js';
 import { EFFORT_COLORS, getModelLabel, getModelProvider, formatCost, formatTokens } from '../utils.js';
+import DiffViewer from './DiffViewer.jsx';
 
 function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models }) {
   if (!task) return null;
@@ -19,6 +21,13 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const [confirmingDismiss, armDismiss, resetDismiss] = useConfirm();
   const [mergeStrategy, setMergeStrategy] = useState('merge');
 
+  // Tab state for done tasks
+  const [activeTab, setActiveTab] = useState('details');
+  const [diff, setDiff] = useState(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState(null);
+  const [revertStatus, setRevertStatus] = useState(null); // null | 'reverting' | 'reverted' | 'error'
+
   // Edit mode state
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
@@ -27,7 +36,35 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const [draftEffort, setDraftEffort] = useState('medium');
   const [draftPlan, setDraftPlan] = useState('');
 
-  useEffect(() => { resetDismiss(); setEditing(false); }, [task?.id]);
+  useEffect(() => { resetDismiss(); setEditing(false); setActiveTab('details'); setDiff(null); setDiffError(null); setRevertStatus(null); }, [task?.id]);
+
+  // Fetch diff when Changes tab is selected
+  useEffect(() => {
+    if (activeTab !== 'changes' || !isDone || !task?.id) return;
+    if (diff) return; // Already loaded
+    setDiffLoading(true);
+    setDiffError(null);
+    api.getTaskDiff(task.id)
+      .then(res => {
+        setDiff(res.diff);
+        setDiffLoading(false);
+      })
+      .catch(err => {
+        setDiffError(err.message);
+        setDiffLoading(false);
+      });
+  }, [activeTab, task?.id, isDone, diff]);
+
+  const handleRevert = async () => {
+    if (!task?.commitHash || !task?.projectId) return;
+    setRevertStatus('reverting');
+    try {
+      await api.revertTask(task.projectId, task.id);
+      setRevertStatus('reverted');
+    } catch (err) {
+      setRevertStatus('error');
+    }
+  };
 
   const enterEditMode = () => {
     setDraftTitle(task.title || '');
@@ -146,95 +183,135 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
           )}
         </div>
 
-        <div className="modal-section">
-          <h3>Description</h3>
-          {editing ? (
-            <textarea
-              className="input modal-edit-textarea"
-              value={draftDescription}
-              onChange={(e) => setDraftDescription(e.target.value)}
-              rows={4}
-              placeholder="Task description"
-            />
-          ) : (
-            <p>{task.description}</p>
-          )}
-        </div>
-
-        {(editing || task.rationale) && (
-          <div className="modal-section">
-            <h3>Rationale</h3>
-            {editing ? (
-              <textarea
-                className="input modal-edit-textarea"
-                value={draftRationale}
-                onChange={(e) => setDraftRationale(e.target.value)}
-                rows={3}
-                placeholder="Why this task matters"
-              />
-            ) : (
-              <p>{task.rationale}</p>
-            )}
+        {isDone && (
+          <div className="modal-tabs">
+            <button
+              className={`modal-tab${activeTab === 'details' ? ' active' : ''}`}
+              onClick={() => setActiveTab('details')}
+            >
+              Details
+            </button>
+            <button
+              className={`modal-tab${activeTab === 'changes' ? ' active' : ''}`}
+              onClick={() => setActiveTab('changes')}
+            >
+              Changes
+            </button>
           </div>
         )}
 
-        {(editing && isPlanned) || task.plan ? (
-          <div className="modal-section">
-            <h3>Implementation Plan</h3>
-            {editing && isPlanned ? (
-              <textarea
-                className="input modal-edit-textarea modal-edit-plan"
-                value={draftPlan}
-                onChange={(e) => setDraftPlan(e.target.value)}
-                rows={10}
-              />
-            ) : (
-              <pre className="modal-plan">{task.plan}</pre>
+        {(!isDone || activeTab === 'details') && (
+          <>
+            <div className="modal-section">
+              <h3>Description</h3>
+              {editing ? (
+                <textarea
+                  className="input modal-edit-textarea"
+                  value={draftDescription}
+                  onChange={(e) => setDraftDescription(e.target.value)}
+                  rows={4}
+                  placeholder="Task description"
+                />
+              ) : (
+                <p>{task.description}</p>
+              )}
+            </div>
+
+            {(editing || task.rationale) && (
+              <div className="modal-section">
+                <h3>Rationale</h3>
+                {editing ? (
+                  <textarea
+                    className="input modal-edit-textarea"
+                    value={draftRationale}
+                    onChange={(e) => setDraftRationale(e.target.value)}
+                    rows={3}
+                    placeholder="Why this task matters"
+                  />
+                ) : (
+                  <p>{task.rationale}</p>
+                )}
+              </div>
             )}
-          </div>
-        ) : null}
 
-        {isDone && task.agentLog && (
-          <div className="modal-section">
-            <h3>Agent Log</h3>
-            <pre className="modal-log">{task.agentLog}</pre>
-          </div>
-        )}
+            {(editing && isPlanned) || task.plan ? (
+              <div className="modal-section">
+                <h3>Implementation Plan</h3>
+                {editing && isPlanned ? (
+                  <textarea
+                    className="input modal-edit-textarea modal-edit-plan"
+                    value={draftPlan}
+                    onChange={(e) => setDraftPlan(e.target.value)}
+                    rows={10}
+                  />
+                ) : (
+                  <pre className="modal-plan">{task.plan}</pre>
+                )}
+              </div>
+            ) : null}
 
-        {task.costUsd > 0 && (
-          <div className="modal-section modal-cost-section">
-            <h3>Cost</h3>
-            <div className="cost-summary">
-              <span className="cost-total">{formatCost(task.costUsd)}</span>
-              {task.tokenUsage && (
-                <div className="cost-breakdown">
-                  {task.tokenUsage.generation && (
-                    <div className="cost-phase">
-                      <span className="cost-phase-label">Generation</span>
-                      <span className="cost-phase-tokens">
-                        {formatTokens(task.tokenUsage.generation.input)} in / {formatTokens(task.tokenUsage.generation.output)} out
-                      </span>
-                    </div>
-                  )}
-                  {task.tokenUsage.planning && (
-                    <div className="cost-phase">
-                      <span className="cost-phase-label">Planning</span>
-                      <span className="cost-phase-tokens">
-                        {formatTokens(task.tokenUsage.planning.input)} in / {formatTokens(task.tokenUsage.planning.output)} out
-                      </span>
-                    </div>
-                  )}
-                  {task.tokenUsage.execution && (
-                    <div className="cost-phase">
-                      <span className="cost-phase-label">Execution</span>
-                      <span className="cost-phase-tokens">
-                        {formatTokens(task.tokenUsage.execution.input)} in / {formatTokens(task.tokenUsage.execution.output)} out
-                      </span>
+            {isDone && task.agentLog && (
+              <div className="modal-section">
+                <h3>Agent Log</h3>
+                <pre className="modal-log">{task.agentLog}</pre>
+              </div>
+            )}
+
+            {task.costUsd > 0 && (
+              <div className="modal-section modal-cost-section">
+                <h3>Cost</h3>
+                <div className="cost-summary">
+                  <span className="cost-total">{formatCost(task.costUsd)}</span>
+                  {task.tokenUsage && (
+                    <div className="cost-breakdown">
+                      {task.tokenUsage.generation && (
+                        <div className="cost-phase">
+                          <span className="cost-phase-label">Generation</span>
+                          <span className="cost-phase-tokens">
+                            {formatTokens(task.tokenUsage.generation.input)} in / {formatTokens(task.tokenUsage.generation.output)} out
+                          </span>
+                        </div>
+                      )}
+                      {task.tokenUsage.planning && (
+                        <div className="cost-phase">
+                          <span className="cost-phase-label">Planning</span>
+                          <span className="cost-phase-tokens">
+                            {formatTokens(task.tokenUsage.planning.input)} in / {formatTokens(task.tokenUsage.planning.output)} out
+                          </span>
+                        </div>
+                      )}
+                      {task.tokenUsage.execution && (
+                        <div className="cost-phase">
+                          <span className="cost-phase-label">Execution</span>
+                          <span className="cost-phase-tokens">
+                            {formatTokens(task.tokenUsage.execution.input)} in / {formatTokens(task.tokenUsage.execution.output)} out
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {isDone && activeTab === 'changes' && (
+          <div className="modal-section">
+            {diffLoading && <p className="text-muted">Loading diff...</p>}
+            {diffError && <p className="text-error">Error: {diffError}</p>}
+            {!diffLoading && !diffError && !diff && <p className="text-muted">No changes recorded for this task.</p>}
+            {!diffLoading && diff && (
+              <DiffViewer
+                diff={diff}
+                commitHash={task.commitHash}
+                onCopy={() => navigator.clipboard.writeText(diff)}
+                onRevert={task.commitHash && !task.reverted && revertStatus !== 'reverted' ? handleRevert : null}
+              />
+            )}
+            {revertStatus === 'reverting' && <p className="text-muted" style={{ marginTop: 8 }}>Reverting...</p>}
+            {revertStatus === 'reverted' && <p style={{ marginTop: 8, color: 'var(--green)', fontSize: 13 }}>Commit reverted successfully.</p>}
+            {revertStatus === 'error' && <p className="text-error" style={{ marginTop: 8 }}>Revert failed. There may be conflicts.</p>}
           </div>
         )}
 

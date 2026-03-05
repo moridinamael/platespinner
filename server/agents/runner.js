@@ -397,6 +397,14 @@ export async function runExecution(task, modelId) {
     broadcast('task:updated', state.getTask(task.id));
   }
 
+  // Capture HEAD before execution so we can diff afterwards
+  let preCommitHash;
+  try {
+    preCommitHash = await gitExec(['rev-parse', 'HEAD'], cwd);
+  } catch {
+    preCommitHash = null;
+  }
+
   const prompt = buildExecutionPrompt(task);
   const { cmd, args, useStdin } = buildExecutionCommand(modelId, prompt);
 
@@ -419,11 +427,32 @@ export async function runExecution(task, modelId) {
     const costData = extractCostData(stdout, prompt, modelId);
     const result = parseExecutionOutput(costData.agentText);
 
+    // Capture diff between pre-execution HEAD and post-execution state
+    let diff = null;
+    if (preCommitHash) {
+      try {
+        const postRef = result.commitHash || 'HEAD';
+        diff = await new Promise((resolve, reject) => {
+          execFile('git', ['diff', `${preCommitHash}..${postRef}`], { cwd, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
+            if (err) return reject(err);
+            resolve(stdout);
+          });
+        });
+        if (diff && diff.length > 500000) {
+          diff = diff.slice(0, 500000) + '\n\n... diff truncated (exceeded 500KB) ...';
+        }
+        if (!diff) diff = null; // empty string → null
+      } catch (e) {
+        console.error('Failed to capture diff:', e.message);
+      }
+    }
+
     const executionCost = costData.costUsd || 0;
     const existingCost = task.costUsd || 0;
     const updates = {
       status: 'done',
       commitHash: result.commitHash || null,
+      diff,
       agentLog: result.summary || costData.agentText.slice(0, 2000),
       tokenUsage: {
         ...(task.tokenUsage || {}),
@@ -437,7 +466,9 @@ export async function runExecution(task, modelId) {
     }
 
     const updated = state.updateTask(task.id, updates);
-    broadcast('execution:completed', { taskId: task.id, ...updates, result, costUsd: executionCost });
+    // Exclude diff from broadcast to avoid large WebSocket payloads
+    const { diff: _diff, ...broadcastUpdates } = updates;
+    broadcast('execution:completed', { taskId: task.id, ...broadcastUpdates, result, costUsd: executionCost });
 
     emitNotification('task:completed', {
       projectId: project.id,
@@ -512,6 +543,16 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
   const project = state.getProject(task.projectId);
   if (!project) throw new Error('Project not found');
 
+  const wtCwd = toWSLPath(worktreeCwd);
+
+  // Capture HEAD before execution so we can diff afterwards
+  let preCommitHash;
+  try {
+    preCommitHash = await gitExec(['rev-parse', 'HEAD'], wtCwd);
+  } catch {
+    preCommitHash = null;
+  }
+
   const prompt = buildExecutionPrompt(task);
   const { cmd, args, useStdin } = buildExecutionCommand(modelId, prompt);
 
@@ -519,7 +560,7 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
   broadcast('execution:started', { taskId: task.id });
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
 
-  const stopPolling = pollGitStatus(toWSLPath(worktreeCwd), task.id);
+  const stopPolling = pollGitStatus(wtCwd, task.id);
 
   const { proc, promise } = spawnAgent(
     cmd, args, worktreeCwd,
@@ -534,11 +575,32 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     const costData = extractCostData(stdout, prompt, modelId);
     const result = parseExecutionOutput(costData.agentText);
 
+    // Capture diff between pre-execution HEAD and post-execution state
+    let diff = null;
+    if (preCommitHash) {
+      try {
+        const postRef = result.commitHash || 'HEAD';
+        diff = await new Promise((resolve, reject) => {
+          execFile('git', ['diff', `${preCommitHash}..${postRef}`], { cwd: wtCwd, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
+            if (err) return reject(err);
+            resolve(stdout);
+          });
+        });
+        if (diff && diff.length > 500000) {
+          diff = diff.slice(0, 500000) + '\n\n... diff truncated (exceeded 500KB) ...';
+        }
+        if (!diff) diff = null;
+      } catch (e) {
+        console.error('Failed to capture diff in worktree:', e.message);
+      }
+    }
+
     const executionCost = costData.costUsd || 0;
     const existingCost = task.costUsd || 0;
     const updates = {
       status: 'done',
       commitHash: result.commitHash || null,
+      diff,
       agentLog: result.summary || costData.agentText.slice(0, 2000),
       tokenUsage: {
         ...(task.tokenUsage || {}),
@@ -548,7 +610,8 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     };
 
     const updated = state.updateTask(task.id, updates);
-    broadcast('execution:completed', { taskId: task.id, ...updates, result, costUsd: executionCost });
+    const { diff: _diff, ...broadcastUpdates } = updates;
+    broadcast('execution:completed', { taskId: task.id, ...broadcastUpdates, result, costUsd: executionCost });
     return updated;
   } catch (err) {
     const revertStatus = task.plan ? 'planned' : 'proposed';
