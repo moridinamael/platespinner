@@ -44,6 +44,9 @@ export const api = {
   createFixTask: (projectId, data) => request('POST', `/projects/${projectId}/fix-tests`, data),
   checkRailway: (id) => request('POST', `/projects/${id}/check-railway`),
   getAgentStatus: () => request('GET', '/agents/status'),
+  startAutoclicker: (config) => request('POST', '/autoclicker/start', config),
+  stopAutoclicker: () => request('POST', '/autoclicker/stop'),
+  getAutoclickerStatus: () => request('GET', '/autoclicker/status'),
 };
 
 // WebSocket manager — tracks connection lifecycle with backoff & cleanup

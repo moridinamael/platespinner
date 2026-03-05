@@ -15,6 +15,19 @@ const runningProcesses = new Map(); // taskId → ChildProcess
 const projectLocks = new Set();     // projectIds currently executing
 const executionQueues = new Map();  // projectId → taskId[]
 
+// --- Autoclicker ---
+const autoclickerConfig = {
+  enabled: false,
+  enabledProjects: new Set(),
+  maxParallel: 3,
+  standoffSeconds: 0,
+  running: false,
+};
+const autoclickerAuditLog = []; // { timestamp, projectId, action, targetTaskId, reasoning }
+const worktreeLocks = new Map(); // worktreePath → taskId
+const autoclickerCycleCount = new Map(); // projectId → number
+const autoclickerConsecutiveFailures = new Map(); // projectId → number
+
 // --- Persistence ---
 
 let _dirty = false;
@@ -28,6 +41,12 @@ function _serialize() {
     tasks: [...tasks.values()],
     promptTemplates: [...promptTemplates.values()],
     executionQueues: Object.fromEntries(executionQueues),
+    autoclicker: {
+      enabled: autoclickerConfig.enabled,
+      enabledProjects: [...autoclickerConfig.enabledProjects],
+      maxParallel: autoclickerConfig.maxParallel,
+      standoffSeconds: autoclickerConfig.standoffSeconds,
+    },
   }, null, 2);
 }
 
@@ -88,6 +107,15 @@ function load() {
         }
       }
     }
+    // Restore autoclicker config (but never auto-resume running)
+    if (data.autoclicker) {
+      autoclickerConfig.enabled = !!data.autoclicker.enabled;
+      autoclickerConfig.enabledProjects = new Set(data.autoclicker.enabledProjects || []);
+      autoclickerConfig.maxParallel = data.autoclicker.maxParallel || 3;
+      autoclickerConfig.standoffSeconds = data.autoclicker.standoffSeconds || 0;
+      autoclickerConfig.running = false; // Never auto-resume
+    }
+
     console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from disk`);
 
     // Recover tasks stuck in transient states from a previous server crash
@@ -357,6 +385,82 @@ export function getTaskQueuePosition(taskId) {
     if (idx !== -1) return { projectId, position: idx + 1, total: queue.length };
   }
   return null;
+}
+
+// --- Autoclicker Config & State ---
+
+export function getAutoclickerConfig() {
+  return {
+    enabled: autoclickerConfig.enabled,
+    enabledProjects: [...autoclickerConfig.enabledProjects],
+    maxParallel: autoclickerConfig.maxParallel,
+    standoffSeconds: autoclickerConfig.standoffSeconds,
+    running: autoclickerConfig.running,
+  };
+}
+
+export function setAutoclickerConfig(updates) {
+  if ('enabled' in updates) autoclickerConfig.enabled = !!updates.enabled;
+  if ('enabledProjects' in updates) {
+    autoclickerConfig.enabledProjects = new Set(Array.isArray(updates.enabledProjects) ? updates.enabledProjects : []);
+  }
+  if ('maxParallel' in updates) autoclickerConfig.maxParallel = updates.maxParallel;
+  if ('standoffSeconds' in updates) autoclickerConfig.standoffSeconds = updates.standoffSeconds;
+  if ('running' in updates) autoclickerConfig.running = !!updates.running;
+  save();
+}
+
+const AUDIT_LOG_MAX = 500;
+
+export function addAuditEntry({ projectId, action, targetTaskId, templateId, reasoning }) {
+  const entry = { timestamp: Date.now(), projectId, action, targetTaskId: targetTaskId || null, templateId: templateId || null, reasoning: reasoning || '' };
+  autoclickerAuditLog.push(entry);
+  if (autoclickerAuditLog.length > AUDIT_LOG_MAX) {
+    autoclickerAuditLog.splice(0, autoclickerAuditLog.length - AUDIT_LOG_MAX);
+  }
+  return entry;
+}
+
+export function getAuditLog(limit = 50) {
+  return autoclickerAuditLog.slice(-limit);
+}
+
+export function lockWorktree(worktreePath, taskId) {
+  if (worktreeLocks.has(worktreePath)) return false;
+  worktreeLocks.set(worktreePath, taskId);
+  return true;
+}
+
+export function unlockWorktree(worktreePath) {
+  worktreeLocks.delete(worktreePath);
+}
+
+export function getActiveWorktreeCount() {
+  return worktreeLocks.size;
+}
+
+export function getAutoclickerCycleCount(projectId) {
+  return autoclickerCycleCount.get(projectId) || 0;
+}
+
+export function incrementCycleCount(projectId) {
+  autoclickerCycleCount.set(projectId, (autoclickerCycleCount.get(projectId) || 0) + 1);
+}
+
+export function resetCycleCount(projectId) {
+  autoclickerCycleCount.delete(projectId);
+}
+
+export function getConsecutiveFailures(projectId) {
+  return autoclickerConsecutiveFailures.get(projectId) || 0;
+}
+
+export function incrementConsecutiveFailures(projectId) {
+  autoclickerConsecutiveFailures.set(projectId, (autoclickerConsecutiveFailures.get(projectId) || 0) + 1);
+}
+
+export function resetConsecutiveFailures(projectId) {
+  autoclickerConsecutiveFailures.delete(projectId);
 }
 
 // --- Graceful shutdown: flush pending state ---

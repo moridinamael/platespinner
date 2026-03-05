@@ -1842,3 +1842,121 @@ html, body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-dim);
 }
+
+/* ===== Autoclicker Mode ===== */
+.sidebar-autoclicker {
+  padding: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.autoclicker-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.autoclicker-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.autoclicker-project-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.autoclicker-status {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: var(--surface);
+  border-radius: 6px;
+  font-size: 0.75rem;
+}
+
+.autoclicker-status-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.autoclicker-project-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.15rem 0;
+}
+
+.project-name-sm {
+  font-size: 0.7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+.cycle-status {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.cycle-status-idle { color: var(--text-muted); }
+.cycle-status-judging { color: var(--yellow); }
+.cycle-status-proposing { color: #5bc0de; }
+.cycle-status-planning { color: var(--accent); }
+.cycle-status-executing { color: var(--green); }
+
+.autoclicker-log {
+  margin-top: 0.5rem;
+}
+
+.autoclicker-log summary {
+  cursor: pointer;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.autoclicker-log-entries {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.audit-entry {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.7rem;
+}
+
+.audit-action {
+  font-weight: 600;
+  min-width: 50px;
+}
+
+.audit-reasoning {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-danger {
+  background: #d9534f;
+  color: white;
+  border: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.btn-danger:hover {
+  background: #c9302c;
+}

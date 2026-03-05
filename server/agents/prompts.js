@@ -5,7 +5,7 @@ import { dirname, join } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const skillsDir = join(__dirname, '..', 'skills');
 
-let paretoSkill, paretoFullSkill, rubricSkill, planningSkill;
+let paretoSkill, paretoFullSkill, rubricSkill, planningSkill, autoclickerJudgeSkill;
 
 try {
   paretoSkill = readFileSync(join(skillsDir, 'pareto.md'), 'utf-8');
@@ -29,6 +29,12 @@ try {
   planningSkill = readFileSync(join(skillsDir, 'planning.md'), 'utf-8');
 } catch {
   planningSkill = 'Analyze the codebase and produce a detailed implementation plan for the given task.';
+}
+
+try {
+  autoclickerJudgeSkill = readFileSync(join(skillsDir, 'autoclicker-judge.md'), 'utf-8');
+} catch {
+  autoclickerJudgeSkill = 'You are an autonomous project improvement judge. Analyze the project state and decide what action to take next.';
 }
 
 export function getBuiltInTemplates() {
@@ -127,6 +133,10 @@ export function buildExecutionPrompt(task) {
     ? `\n\n## Implementation Plan\n\nA planning agent has already analyzed the codebase and produced the following implementation plan. Follow this plan closely:\n\n${task.plan}\n\n---\n`
     : '';
 
+  const priorAttempt = task.agentLog
+    ? `\n\n## Prior Attempt\n\nA previous execution agent attempted this task but failed. There may be partial changes in the working directory. Review the current state before proceeding.\n\n**Agent log:** ${task.agentLog}\n\n---\n`
+    : '';
+
   return `${rubricSkill}
 
 ---
@@ -136,8 +146,43 @@ export function buildExecutionPrompt(task) {
 **Title:** ${task.title}
 **Description:** ${task.description}
 **Rationale:** ${task.rationale}
-${planSection}
+${planSection}${priorAttempt}
 Implement this task in the current working directory. Follow the rubric process: analyze, create rubric, implement, verify, self-score, then git commit.
 
 IMPORTANT: Your output MUST contain the result wrapped in <execution-result> tags exactly as specified in the instructions above. Do not output anything after the closing </execution-result> tag.`;
+}
+
+export function buildJudgmentPrompt(project, tasks, templates, gitLog, testResult) {
+  const tasksSummary = tasks.map(t => ({
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    effort: t.effort,
+    description: t.description?.slice(0, 200),
+    plan: t.plan ? 'yes' : 'no',
+  }));
+
+  const templatesSummary = templates.map(t => ({ id: t.id, name: t.name }));
+
+  const context = JSON.stringify({
+    project: { id: project.id, name: project.name, path: project.path },
+    tasks: tasksSummary,
+    templates: templatesSummary,
+    recentGitLog: gitLog,
+    lastTestResult: testResult ? { passed: testResult.passed, summary: testResult.summary } : null,
+  }, null, 2);
+
+  return `${autoclickerJudgeSkill}
+
+---
+
+## Current Project State
+
+\`\`\`json
+${context}
+\`\`\`
+
+Analyze the project state and output your decision.
+
+IMPORTANT: Your output MUST contain the decision wrapped in <autoclicker-decision> tags. Do not output anything after the closing tag.`;
 }

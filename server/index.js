@@ -11,6 +11,7 @@ import projectRoutes, { checkRailwayHealth } from './routes/projects.js';
 import taskRoutes from './routes/tasks.js';
 import templateRoutes from './routes/templates.js';
 import agentRoutes from './routes/agents.js';
+import autoclickerRoutes from './routes/autoclicker.js';
 import * as state from './state.js';
 import { broadcast } from './ws.js';
 
@@ -60,6 +61,7 @@ app.use('/api', projectRoutes);
 app.use('/api', taskRoutes);
 app.use('/api', templateRoutes);
 app.use('/api', agentRoutes);
+app.use('/api', autoclickerRoutes);
 
 // Proxy for iframe preview — strips X-Frame-Options / CSP frame-ancestors
 app.get('/api/proxy', async (req, res) => {

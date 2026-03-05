@@ -15,6 +15,9 @@ export default function Sidebar({
   testStatusMap,
   railwayStatusMap,
   onClearTestResult,
+  autoclickerStatus,
+  onStartAutoclicker,
+  onStopAutoclicker,
 }) {
   const [path, setPath] = useState('');
   const [pushing, setPushing] = useState(null);
@@ -29,6 +32,12 @@ export default function Sidebar({
   const [railwayInput, setRailwayInput] = useState('');
   const [confirmingProjectId, setConfirmingProjectId] = useState(null);
   const confirmTimerRef = useRef(null);
+
+  // Autoclicker local state
+  const [acEnabled, setAcEnabled] = useState(false);
+  const [acMaxParallel, setAcMaxParallel] = useState(3);
+  const [acStandoff, setAcStandoff] = useState(0);
+  const [acSelectedProjects, setAcSelectedProjects] = useState(new Set());
 
   const testStatus = testStatusMap[selectedProjectId];
   const testing = !!testStatus?.running;
@@ -67,6 +76,16 @@ export default function Sidebar({
     api.getTestInfo(selectedProjectId).then(setTestInfo).catch(() => {});
     api.getGitStatus(selectedProjectId).then(setGitInfo).catch(() => {});
   }, [setupResult, selectedProjectId]);
+
+  useEffect(() => {
+    if (autoclickerStatus) {
+      setAcEnabled(autoclickerStatus.running);
+      if (autoclickerStatus.enabledProjects) {
+        setAcSelectedProjects(new Set(autoclickerStatus.enabledProjects));
+      }
+      if (autoclickerStatus.maxParallel) setAcMaxParallel(autoclickerStatus.maxParallel);
+    }
+  }, [autoclickerStatus]);
 
   useEffect(() => () => clearTimeout(confirmTimerRef.current), []);
 
@@ -254,6 +273,121 @@ export default function Sidebar({
           );
         })}
       </nav>
+
+      {/* Autoclicker Mode Panel */}
+      <div className="sidebar-autoclicker">
+        <label className="setting-field setting-field-row">
+          <input
+            type="checkbox"
+            className="setting-checkbox"
+            checked={acEnabled}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setAcEnabled(true);
+              } else {
+                setAcEnabled(false);
+                if (autoclickerStatus?.running) onStopAutoclicker();
+              }
+            }}
+          />
+          <span className="setting-label">Autoclicker Mode</span>
+        </label>
+
+        {acEnabled && (
+          <div className="autoclicker-controls">
+            <div className="autoclicker-projects">
+              <span className="setting-label">Enabled Projects</span>
+              {projects.map(p => (
+                <label key={p.id} className="autoclicker-project-check">
+                  <input
+                    type="checkbox"
+                    checked={acSelectedProjects.has(p.id)}
+                    onChange={(e) => {
+                      setAcSelectedProjects(prev => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(p.id);
+                        else next.delete(p.id);
+                        return next;
+                      });
+                    }}
+                  />
+                  <span>{p.name}</span>
+                </label>
+              ))}
+            </div>
+
+            <label className="setting-field">
+              <span className="setting-label">Max Parallel Processes</span>
+              <input
+                type="number"
+                className="input input-sm"
+                min="1" max="10"
+                value={acMaxParallel}
+                onChange={(e) => setAcMaxParallel(Math.min(10, Math.max(1, parseInt(e.target.value) || 1)))}
+              />
+            </label>
+
+            <label className="setting-field">
+              <span className="setting-label">Spawn Standoff (seconds)</span>
+              <input
+                type="number"
+                className="input input-sm"
+                min="0" max="300"
+                value={acStandoff}
+                onChange={(e) => setAcStandoff(Math.max(0, parseInt(e.target.value) || 0))}
+              />
+            </label>
+
+            <button
+              className={`btn ${autoclickerStatus?.running ? 'btn-danger' : 'btn-primary'}`}
+              disabled={acSelectedProjects.size === 0 && !autoclickerStatus?.running}
+              onClick={() => {
+                if (autoclickerStatus?.running) {
+                  onStopAutoclicker();
+                } else {
+                  onStartAutoclicker({
+                    enabledProjectIds: [...acSelectedProjects],
+                    maxParallel: acMaxParallel,
+                    standoffSeconds: acStandoff,
+                  });
+                }
+              }}
+            >
+              {autoclickerStatus?.running ? 'Stop Autoclicker' : 'Start Autoclicker'}
+            </button>
+
+            {autoclickerStatus?.running && (
+              <div className="autoclicker-status">
+                <div className="autoclicker-status-row">
+                  <span>Active: {autoclickerStatus.activeProcessCount} / {autoclickerStatus.maxParallel}</span>
+                </div>
+                {autoclickerStatus.projectStatuses && Object.entries(autoclickerStatus.projectStatuses).map(([pid, status]) => {
+                  const proj = projects.find(p => p.id === pid);
+                  return (
+                    <div key={pid} className="autoclicker-project-status">
+                      <span className="project-name-sm">{proj?.name || pid.slice(0, 8)}</span>
+                      <span className={`cycle-status cycle-status-${status}`}>{status}</span>
+                    </div>
+                  );
+                })}
+                {autoclickerStatus.auditLog?.length > 0 && (
+                  <details className="autoclicker-log">
+                    <summary>Recent Actions ({autoclickerStatus.auditLog.length})</summary>
+                    <div className="autoclicker-log-entries">
+                      {autoclickerStatus.auditLog.slice(-10).reverse().map((entry, i) => (
+                        <div key={i} className="audit-entry">
+                          <span className="audit-action">{entry.action}</span>
+                          <span className="audit-reasoning">{entry.reasoning}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {selectedProjectId && (
         <div className="sidebar-project-settings">

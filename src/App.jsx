@@ -32,6 +32,7 @@ export default function App() {
   const [selectedTemplateId, setSelectedTemplateId] = useState('builtin:pareto-simple');
   const wsRef = useRef(null);
   const [agentCensus, setAgentCensus] = useState(null);
+  const [autoclickerStatus, setAutoclickerStatus] = useState(null);
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
 
@@ -72,6 +73,7 @@ export default function App() {
     api.getTemplates().then(setTemplates).catch(console.error);
     api.getModels().then(setModels).catch(console.error);
     api.getAgentStatus().then(setAgentCensus).catch(console.error);
+    api.getAutoclickerStatus().then(setAutoclickerStatus).catch(() => {});
     api.getTasks().then((loaded) => {
       setTasks(loaded);
       const execStarts = {};
@@ -366,6 +368,18 @@ export default function App() {
       case 'agents:census':
         setAgentCensus(data);
         break;
+      case 'autoclicker:started':
+      case 'autoclicker:stopped':
+      case 'autoclicker:decision':
+      case 'autoclicker:phase':
+      case 'autoclicker:cycle-complete':
+      case 'autoclicker:error':
+      case 'autoclicker:project-paused':
+      case 'autoclicker:project-disabled':
+      case 'autoclicker:merge-conflict':
+      case 'autoclicker:merge-complete':
+        api.getAutoclickerStatus().then(setAutoclickerStatus).catch(() => {});
+        break;
     }
   }, []);
 
@@ -494,6 +508,24 @@ export default function App() {
     }
   };
 
+  const handleStartAutoclicker = async (config) => {
+    try {
+      await api.startAutoclicker(config);
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  };
+
+  const handleStopAutoclicker = async () => {
+    try {
+      await api.stopAutoclicker();
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  };
+
   const filteredTasks = selectedProjectId
     ? tasks.filter((t) => t.projectId === selectedProjectId)
     : tasks;
@@ -517,6 +549,9 @@ export default function App() {
           testStatusMap={testStatusMap}
           railwayStatusMap={railwayStatusMap}
           onClearTestResult={(id) => setTestStatusMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
+          autoclickerStatus={autoclickerStatus}
+          onStartAutoclicker={handleStartAutoclicker}
+          onStopAutoclicker={handleStopAutoclicker}
         />
       </ErrorBoundary>
       <main className="main">

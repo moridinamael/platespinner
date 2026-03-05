@@ -30,13 +30,9 @@ export function parseGenerationOutput(stdout) {
   }
   if (objects.length > 0) return objects;
 
-  // Strategy 4: Return raw output as a single card
-  return [{
-    title: 'Unstructured agent output',
-    description: stdout.slice(0, 2000),
-    rationale: 'Agent output could not be parsed into structured proposals',
-    estimatedEffort: 'medium',
-  }];
+  // Strategy 4: No structured proposals found — return empty
+  // (The agent produced conversational output without task-proposals tags)
+  return [];
 }
 
 export function parseTestSetupOutput(stdout) {
@@ -91,6 +87,27 @@ export function parsePlanningOutput(stdout) {
 
   // Strategy 3: Fallback — return raw stdout as plan text
   return stdout.slice(0, 10000);
+}
+
+export function parseJudgmentOutput(stdout) {
+  const match = stdout.match(/<autoclicker-decision>([\s\S]*?)<\/autoclicker-decision>/);
+  if (!match) {
+    return { action: 'skip', reasoning: 'No decision tags found in output' };
+  }
+  try {
+    const decision = JSON.parse(match[1].trim());
+    if (!['propose', 'plan', 'execute', 'skip'].includes(decision.action)) {
+      return { action: 'skip', reasoning: `Invalid action: ${decision.action}` };
+    }
+    return {
+      action: decision.action,
+      targetTaskId: decision.targetTaskId || null,
+      templateId: decision.templateId || null,
+      reasoning: decision.reasoning || 'No reasoning provided',
+    };
+  } catch (err) {
+    return { action: 'skip', reasoning: `Failed to parse decision JSON: ${err.message}` };
+  }
 }
 
 export function parseExecutionOutput(stdout) {

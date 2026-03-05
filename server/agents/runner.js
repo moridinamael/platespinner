@@ -2,8 +2,8 @@ import { spawn, execFile, execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { broadcast } from '../ws.js';
 import { buildGenerationCommand, buildExecutionCommand, buildTestSetupCommand } from './cli.js';
-import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, buildTestSetupPrompt, getBuiltInTemplates } from './prompts.js';
-import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput } from './parser.js';
+import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, buildTestSetupPrompt, buildJudgmentPrompt, getBuiltInTemplates } from './prompts.js';
+import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput, parseJudgmentOutput } from './parser.js';
 import { toWSLPath } from '../paths.js';
 import { DEFAULT_MODEL_ID } from '../models.js';
 import { runTests, validateTestCommand } from '../testing.js';
@@ -318,8 +318,10 @@ export async function runExecution(task, modelId) {
     return updated;
   } catch (err) {
     const aborted = state.wasAborted(task.id);
-    const revertStatus = aborted && task.plan ? 'planned' : 'proposed';
-    const agentLog = aborted ? 'Aborted by user' : err.message;
+    const revertStatus = task.plan ? 'planned' : 'proposed';
+    const agentLog = aborted
+      ? 'Aborted by user'
+      : `Execution failed (agent exited unexpectedly). The previous agent may have left partial changes in the working directory. Error: ${err.message}`;
     state.updateTask(task.id, { status: revertStatus, agentLog });
     broadcast('execution:failed', { taskId: task.id, error: agentLog, aborted, status: revertStatus });
     if (!aborted) throw err;
@@ -332,6 +334,56 @@ export async function runExecution(task, modelId) {
     unregisterAgent(agentId);
   }
 }
+
+export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
+  modelId = modelId || DEFAULT_MODEL_ID;
+  const project = state.getProject(task.projectId);
+  if (!project) throw new Error('Project not found');
+
+  const prompt = buildExecutionPrompt(task);
+  const { cmd, args, useStdin } = buildExecutionCommand(modelId, prompt);
+
+  state.updateTask(task.id, { status: 'executing', executedBy: modelId });
+  broadcast('execution:started', { taskId: task.id });
+  const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
+
+  const stopPolling = pollGitStatus(toWSLPath(worktreeCwd), task.id);
+
+  const { proc, promise } = spawnAgent(
+    cmd, args, worktreeCwd,
+    useStdin ? prompt : null,
+    (bytes) => { broadcast('execution:progress', { taskId: task.id, bytesReceived: bytes }); }
+  );
+
+  state.setProcess(task.id, { proc, stopPolling });
+
+  try {
+    const stdout = await promise;
+    const result = parseExecutionOutput(stdout);
+
+    const updates = {
+      status: 'done',
+      commitHash: result.commitHash || null,
+      agentLog: result.summary || stdout.slice(0, 2000),
+    };
+
+    const updated = state.updateTask(task.id, updates);
+    broadcast('execution:completed', { taskId: task.id, ...updates, result });
+    return updated;
+  } catch (err) {
+    const revertStatus = task.plan ? 'planned' : 'proposed';
+    const agentLog = `Execution failed in worktree: ${err.message}`;
+    state.updateTask(task.id, { status: revertStatus, agentLog });
+    broadcast('execution:failed', { taskId: task.id, error: agentLog, aborted: false, status: revertStatus });
+    throw err;
+  } finally {
+    state.removeProcess(task.id);
+    stopPolling();
+    unregisterAgent(agentId);
+  }
+}
+
+export { spawnAgent };
 
 export async function runTestSetup(project, testInfo) {
   if (!state.lockProject(project.id)) {
