@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { execFile } from 'child_process';
+import { createReadStream, statSync } from 'fs';
+import { join } from 'path';
 import * as state from '../state.js';
+import { LOGS_DIR } from '../state.js';
 import { broadcast } from '../ws.js';
 import { toWSLPath } from '../paths.js';
 import { runGeneration, runExecution, runPlanning } from '../agents/runner.js';
@@ -249,6 +252,44 @@ router.get('/tasks/:id/diff', async (req, res) => {
   }
 
   res.json({ diff: null, source: 'unavailable' });
+});
+
+// --- Log endpoints ---
+
+router.get('/tasks/:id/logs', (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  const phases = ['generation', 'planning', 'execution', 'judgment'];
+  const available = [];
+  for (const phase of phases) {
+    const logFile = join(LOGS_DIR, `${task.id}-${phase}.log`);
+    try {
+      const stats = statSync(logFile);
+      available.push({ phase, size: stats.size });
+    } catch { /* not found */ }
+  }
+  res.json(available);
+});
+
+router.get('/tasks/:id/logs/:phase', (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  const phase = req.params.phase;
+  if (!['generation', 'planning', 'execution', 'judgment'].includes(phase)) {
+    return res.status(400).json({ error: 'Invalid phase' });
+  }
+
+  const logFile = join(LOGS_DIR, `${task.id}-${phase}.log`);
+  try {
+    const stats = statSync(logFile);
+    res.set('Content-Type', 'text/plain');
+    res.set('X-Log-Size', stats.size.toString());
+    createReadStream(logFile).pipe(res);
+  } catch {
+    return res.status(404).json({ error: 'Log file not found' });
+  }
 });
 
 // --- Batch operations ---

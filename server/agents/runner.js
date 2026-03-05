@@ -1,5 +1,7 @@
 import { spawn, execFile, execFileSync } from 'child_process';
+import { createWriteStream, mkdirSync, statSync } from 'fs';
 import { homedir } from 'os';
+import { join } from 'path';
 import { broadcast } from '../ws.js';
 import { buildGenerationCommand, buildExecutionCommand, buildTestSetupCommand } from './cli.js';
 import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, buildTestSetupPrompt, buildJudgmentPrompt, getBuiltInTemplates } from './prompts.js';
@@ -8,10 +10,21 @@ import { toWSLPath } from '../paths.js';
 import { DEFAULT_MODEL_ID, getModel, estimateCost } from '../models.js';
 import { runTests, validateTestCommand } from '../testing.js';
 import * as state from '../state.js';
+import { LOGS_DIR } from '../state.js';
 import { registerAgent, unregisterAgent } from '../census.js';
 import { emitNotification, checkAllTasksDone } from '../notifications.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
+
+// --- Log file helpers ---
+
+function createLogStream(taskId, phase) {
+  mkdirSync(LOGS_DIR, { recursive: true });
+  const filename = `${taskId}-${phase}.log`;
+  const filePath = join(LOGS_DIR, filename);
+  const stream = createWriteStream(filePath, { flags: 'a' });
+  return { stream, filePath, filename };
+}
 
 // --- Git branch helpers ---
 
@@ -136,7 +149,7 @@ function cleanEnv() {
   return env;
 }
 
-function spawnAgent(cmd, args, cwd, stdinData, onProgress) {
+function spawnAgent(cmd, args, cwd, stdinData, onProgress, logStream) {
   cwd = toWSLPath(cwd);
   let stdout = '';
   let stderr = '';
@@ -161,13 +174,19 @@ function spawnAgent(cmd, args, cwd, stdinData, onProgress) {
     proc.stdout.on('data', (chunk) => {
       const text = chunk.toString();
       stdout += text;
-      if (onProgress) onProgress(stdout.length);
+      if (logStream) logStream.write(chunk);
+      if (onProgress) onProgress(stdout.length, text);
     });
 
-    proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    proc.stderr.on('data', (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      if (logStream) logStream.write(chunk);
+    });
 
     proc.on('close', (code) => {
       clearTimeout(timer);
+      if (logStream) logStream.end();
       if (code === 0) {
         resolve(stdout);
       } else {
@@ -177,6 +196,7 @@ function spawnAgent(cmd, args, cwd, stdinData, onProgress) {
 
     proc.on('error', (err) => {
       clearTimeout(timer);
+      if (logStream) logStream.end();
       reject(err);
     });
   });
@@ -245,7 +265,8 @@ export async function runGeneration(project, templateId, modelId, promptContent)
     const { promise } = spawnAgent(
       cmd, args, project.path,
       useStdin ? prompt : null,
-      (bytes) => { broadcast('generation:progress', { projectId: project.id, bytesReceived: bytes }); }
+      (bytes) => { broadcast('generation:progress', { projectId: project.id, bytesReceived: bytes }); },
+      null
     );
     const stdout = await promise;
     const costData = extractCostData(stdout, prompt, modelId);
@@ -314,10 +335,16 @@ export async function runPlanning(task, modelId) {
   broadcast('planning:started', { taskId: task.id });
   const agentId = registerAgent({ type: 'planning', projectId: project.id, taskId: task.id, modelId });
 
+  const { stream: logStream } = createLogStream(task.id, 'planning');
+
   const { proc, promise } = spawnAgent(
     cmd, args, project.path,
     useStdin ? prompt : null,
-    (bytes) => { broadcast('planning:progress', { taskId: task.id, bytesReceived: bytes }); }
+    (bytes, textChunk) => {
+      broadcast('planning:progress', { taskId: task.id, bytesReceived: bytes });
+      if (textChunk) broadcast('log:chunk', { taskId: task.id, phase: 'planning', chunk: textChunk });
+    },
+    logStream
   );
   state.setProcess(task.id, proc);
 
@@ -356,6 +383,7 @@ export async function runPlanning(task, modelId) {
     }
     throw err;
   } finally {
+    logStream.end();
     state.removeProcess(task.id);
     unregisterAgent(agentId);
   }
@@ -413,11 +441,16 @@ export async function runExecution(task, modelId) {
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
 
   const stopPolling = pollGitStatus(cwd, task.id);
+  const { stream: logStream } = createLogStream(task.id, 'execution');
 
   const { proc, promise } = spawnAgent(
     cmd, args, project.path,
     useStdin ? prompt : null,
-    (bytes) => { broadcast('execution:progress', { taskId: task.id, bytesReceived: bytes }); }
+    (bytes, textChunk) => {
+      broadcast('execution:progress', { taskId: task.id, bytesReceived: bytes });
+      if (textChunk) broadcast('log:chunk', { taskId: task.id, phase: 'execution', chunk: textChunk });
+    },
+    logStream
   );
 
   state.setProcess(task.id, { proc, stopPolling });
@@ -521,6 +554,7 @@ export async function runExecution(task, modelId) {
     });
     if (!aborted) throw err;
   } finally {
+    logStream.end();
     // Checkout back to base branch if we created a per-task branch
     if (baseBranch) {
       try {
@@ -561,11 +595,16 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
 
   const stopPolling = pollGitStatus(wtCwd, task.id);
+  const { stream: wtLogStream } = createLogStream(task.id, 'execution');
 
   const { proc, promise } = spawnAgent(
     cmd, args, worktreeCwd,
     useStdin ? prompt : null,
-    (bytes) => { broadcast('execution:progress', { taskId: task.id, bytesReceived: bytes }); }
+    (bytes, textChunk) => {
+      broadcast('execution:progress', { taskId: task.id, bytesReceived: bytes });
+      if (textChunk) broadcast('log:chunk', { taskId: task.id, phase: 'execution', chunk: textChunk });
+    },
+    wtLogStream
   );
 
   state.setProcess(task.id, { proc, stopPolling });
@@ -620,6 +659,7 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     broadcast('execution:failed', { taskId: task.id, error: agentLog, aborted: false, status: revertStatus });
     throw err;
   } finally {
+    wtLogStream.end();
     state.removeProcess(task.id);
     stopPolling();
     unregisterAgent(agentId);
@@ -643,7 +683,8 @@ export async function runTestSetup(project, testInfo) {
     const { promise } = spawnAgent(
       cmd, args, project.path,
       useStdin ? prompt : null,
-      (bytes) => { broadcast('setup-tests:progress', { projectId: project.id, bytesReceived: bytes }); }
+      (bytes) => { broadcast('setup-tests:progress', { projectId: project.id, bytesReceived: bytes }); },
+      null
     );
     const stdout = await promise;
     const costData = extractCostData(stdout, prompt, DEFAULT_MODEL_ID);

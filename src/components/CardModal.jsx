@@ -1,10 +1,13 @@
-import { useState, useEffect, memo } from 'react';
+import { useState, useEffect, useRef, useMemo, memo } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { api } from '../api.js';
-import { EFFORT_COLORS, getModelLabel, getModelProvider, formatCost, formatTokens } from '../utils.js';
+import { EFFORT_COLORS, getModelLabel, getModelProvider, formatCost, formatTokens, formatLogSize } from '../utils.js';
 import DiffViewer from './DiffViewer.jsx';
+import AnsiToHtml from 'ansi-to-html';
 
-function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models }) {
+const ansiConverter = new AnsiToHtml({ fg: '#959ab0', bg: 'transparent', newline: true });
+
+function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models, streamingLog, logStreamVersion }) {
   if (!task) return null;
 
   const isProposed = task.status === 'proposed';
@@ -13,7 +16,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const isQueued = task.status === 'queued';
   const isExecuting = task.status === 'executing';
   const isDone = task.status === 'done';
-  const isEditable = isProposed || isPlanned;
+  const isActive = isExecuting || isPlanning;
 
   // Default model: same as generating model, or first available
   const defaultModelId = task.generatedBy || (models?.[0]?.id) || 'claude-opus-4-6';
@@ -21,12 +24,20 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const [confirmingDismiss, armDismiss, resetDismiss] = useConfirm();
   const [mergeStrategy, setMergeStrategy] = useState('merge');
 
-  // Tab state for done tasks
+  // Tab state — always available now (details, changes for done, logs for all)
   const [activeTab, setActiveTab] = useState('details');
   const [diff, setDiff] = useState(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState(null);
-  const [revertStatus, setRevertStatus] = useState(null); // null | 'reverting' | 'reverted' | 'error'
+  const [revertStatus, setRevertStatus] = useState(null);
+
+  // Log viewer state
+  const [logContent, setLogContent] = useState('');
+  const [logMeta, setLogMeta] = useState([]);
+  const [selectedLogPhase, setSelectedLogPhase] = useState(null);
+  const [logSearch, setLogSearch] = useState('');
+  const [logLoading, setLogLoading] = useState(false);
+  const logContainerRef = useRef(null);
 
   // Edit mode state
   const [editing, setEditing] = useState(false);
@@ -36,12 +47,24 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const [draftEffort, setDraftEffort] = useState('medium');
   const [draftPlan, setDraftPlan] = useState('');
 
-  useEffect(() => { resetDismiss(); setEditing(false); setActiveTab('details'); setDiff(null); setDiffError(null); setRevertStatus(null); }, [task?.id]);
+  // Reset state on task change
+  useEffect(() => {
+    resetDismiss();
+    setEditing(false);
+    setActiveTab('details');
+    setDiff(null);
+    setDiffError(null);
+    setRevertStatus(null);
+    setLogContent('');
+    setLogMeta([]);
+    setSelectedLogPhase(null);
+    setLogSearch('');
+  }, [task?.id]);
 
   // Fetch diff when Changes tab is selected
   useEffect(() => {
     if (activeTab !== 'changes' || !isDone || !task?.id) return;
-    if (diff) return; // Already loaded
+    if (diff) return;
     setDiffLoading(true);
     setDiffError(null);
     api.getTaskDiff(task.id)
@@ -54,6 +77,73 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
         setDiffLoading(false);
       });
   }, [activeTab, task?.id, isDone, diff]);
+
+  // Fetch log metadata when Logs tab is selected
+  useEffect(() => {
+    if (activeTab !== 'logs' || !task) return;
+    api.getTaskLogMeta(task.id).then(setLogMeta).catch(() => setLogMeta([]));
+  }, [activeTab, task?.id]);
+
+  // Auto-select latest available phase
+  useEffect(() => {
+    if (logMeta.length > 0 && !selectedLogPhase) {
+      setSelectedLogPhase(logMeta[logMeta.length - 1].phase);
+    }
+  }, [logMeta, selectedLogPhase]);
+
+  // Fetch log content when phase changes (for completed tasks)
+  useEffect(() => {
+    if (!selectedLogPhase || !task || activeTab !== 'logs') return;
+    if (isActive) return; // For active tasks, use streaming buffer
+    setLogLoading(true);
+    api.getTaskLog(task.id, selectedLogPhase)
+      .then(({ text }) => {
+        setLogContent(text);
+        setLogLoading(false);
+      })
+      .catch(() => { setLogContent(''); setLogLoading(false); });
+  }, [selectedLogPhase, task?.id, activeTab, isActive]);
+
+  // Compute displayed log content
+  const displayedLog = useMemo(() => {
+    let raw = isActive ? (streamingLog || logContent) : logContent;
+
+    // Apply search filter (strip ANSI for matching)
+    if (logSearch && raw) {
+      const searchLower = logSearch.toLowerCase();
+      const lines = raw.split('\n');
+      const filtered = lines.filter(l =>
+        l.replace(/\x1b\[[0-9;]*m/g, '').toLowerCase().includes(searchLower)
+      );
+      raw = filtered.join('\n');
+    }
+    return raw;
+  }, [logContent, streamingLog, logSearch, isActive, logStreamVersion]);
+
+  // Convert ANSI to HTML
+  const renderedLog = useMemo(() => {
+    if (!displayedLog) return '<span style="color: var(--text-dim)">No log available</span>';
+    // Cap at 500KB for rendering performance
+    const text = displayedLog.length > 512000
+      ? displayedLog.slice(-512000) + '\n\n... (truncated, showing last 500KB) ...'
+      : displayedLog;
+    try {
+      return ansiConverter.toHtml(text);
+    } catch {
+      return text;
+    }
+  }, [displayedLog]);
+
+  // Auto-scroll during streaming
+  useEffect(() => {
+    if (logContainerRef.current && isActive && activeTab === 'logs') {
+      const el = logContainerRef.current;
+      const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+      if (isAtBottom) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+  }, [renderedLog, isActive, activeTab]);
 
   const handleRevert = async () => {
     if (!task?.commitHash || !task?.projectId) return;
@@ -105,6 +195,9 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const legacyLabel = !task.generatedBy && !task.executedBy && task.agentType
     ? task.agentType.charAt(0).toUpperCase() + task.agentType.slice(1)
     : null;
+
+  // Show tabs when: done (details/changes/logs), or active (details/logs), or any task has logs
+  const showTabs = isDone || isActive || isPlanned || isProposed;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -183,7 +276,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
           )}
         </div>
 
-        {isDone && (
+        {showTabs && (
           <div className="modal-tabs">
             <button
               className={`modal-tab${activeTab === 'details' ? ' active' : ''}`}
@@ -191,16 +284,25 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
             >
               Details
             </button>
+            {isDone && (
+              <button
+                className={`modal-tab${activeTab === 'changes' ? ' active' : ''}`}
+                onClick={() => setActiveTab('changes')}
+              >
+                Changes
+              </button>
+            )}
             <button
-              className={`modal-tab${activeTab === 'changes' ? ' active' : ''}`}
-              onClick={() => setActiveTab('changes')}
+              className={`modal-tab${activeTab === 'logs' ? ' active' : ''}`}
+              onClick={() => setActiveTab('logs')}
             >
-              Changes
+              Logs
+              {isActive && <span className="modal-tab-badge live-badge">LIVE</span>}
             </button>
           </div>
         )}
 
-        {(!isDone || activeTab === 'details') && (
+        {activeTab === 'details' && (
           <>
             <div className="modal-section">
               <h3>Description</h3>
@@ -312,6 +414,63 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
             {revertStatus === 'reverting' && <p className="text-muted" style={{ marginTop: 8 }}>Reverting...</p>}
             {revertStatus === 'reverted' && <p style={{ marginTop: 8, color: 'var(--green)', fontSize: 13 }}>Commit reverted successfully.</p>}
             {revertStatus === 'error' && <p className="text-error" style={{ marginTop: 8 }}>Revert failed. There may be conflicts.</p>}
+          </div>
+        )}
+
+        {activeTab === 'logs' && (
+          <div className="modal-section modal-logs-section">
+            <div className="log-toolbar">
+              <div className="log-phase-selector">
+                {isActive && (
+                  <button
+                    className={`log-phase-btn ${!selectedLogPhase || selectedLogPhase === (isPlanning ? 'planning' : 'execution') ? 'active' : ''}`}
+                    onClick={() => setSelectedLogPhase(isPlanning ? 'planning' : 'execution')}
+                  >
+                    {isPlanning ? 'planning' : 'execution'}
+                    <span className="log-live-dot" />
+                  </button>
+                )}
+                {logMeta.map(m => (
+                  <button
+                    key={m.phase}
+                    className={`log-phase-btn ${selectedLogPhase === m.phase ? 'active' : ''}`}
+                    onClick={() => setSelectedLogPhase(m.phase)}
+                  >
+                    {m.phase}
+                    <span className="log-size">{formatLogSize(m.size)}</span>
+                  </button>
+                ))}
+                {!isActive && logMeta.length === 0 && (
+                  <span className="text-muted" style={{ fontSize: 12 }}>No logs available</span>
+                )}
+              </div>
+              <input
+                type="text"
+                className="log-search"
+                placeholder="Search logs..."
+                value={logSearch}
+                onChange={(e) => setLogSearch(e.target.value)}
+              />
+              <button
+                className="btn btn-sm log-copy-btn"
+                onClick={() => {
+                  const plain = displayedLog || '';
+                  navigator.clipboard.writeText(plain);
+                }}
+              >
+                Copy Log
+              </button>
+            </div>
+            <div className="log-viewer" ref={logContainerRef}>
+              {logLoading ? (
+                <div className="log-loading">Loading...</div>
+              ) : (
+                <pre
+                  className="log-content"
+                  dangerouslySetInnerHTML={{ __html: renderedLog }}
+                />
+              )}
+            </div>
           </div>
         )}
 

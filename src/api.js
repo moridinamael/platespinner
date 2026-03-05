@@ -60,6 +60,14 @@ export const api = {
   stopAll: () => request('POST', '/tasks/stop-all'),
   getTaskDiff: (id) => request('GET', `/tasks/${id}/diff`),
   revertTask: (projectId, taskId) => request('POST', `/projects/${projectId}/tasks/${taskId}/revert`),
+  getTaskLogMeta: (taskId) => request('GET', `/tasks/${taskId}/logs`),
+  getTaskLog: async (taskId, phase) => {
+    const res = await fetch(`${BASE}/tasks/${taskId}/logs/${phase}`);
+    if (!res.ok) throw new Error('Log not found');
+    const text = await res.text();
+    const size = parseInt(res.headers.get('X-Log-Size') || '0', 10);
+    return { text, size };
+  },
 };
 
 // WebSocket manager — tracks connection lifecycle with backoff & cleanup

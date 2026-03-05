@@ -37,6 +37,10 @@ export default function App() {
   // Batched progress updates for generation and setup-tests (flushed every ~200ms)
   const pendingProgressRef = useRef({ generating: {}, setup: {} });
   const flushTimerRef = useRef(null);
+  // Log streaming buffer: taskId → accumulated log string
+  const logBufferRef = useRef({});
+  const [logStreamVersion, setLogStreamVersion] = useState(0);
+  const logFlushTimerRef = useRef(null);
   const [agentCensus, setAgentCensus] = useState(null);
   const [autoclickerStatus, setAutoclickerStatus] = useState(null);
   const [notificationSettings, setNotificationSettings] = useState(null);
@@ -248,6 +252,7 @@ export default function App() {
         break;
       case 'planning:completed':
         clearProgress(data.taskId);
+        delete logBufferRef.current[data.taskId];
         setPlanStartTimes((prev) => {
           const next = { ...prev };
           delete next[data.taskId];
@@ -264,6 +269,7 @@ export default function App() {
         break;
       case 'planning:failed':
         clearProgress(data.taskId);
+        delete logBufferRef.current[data.taskId];
         setPlanStartTimes((prev) => {
           const next = { ...prev };
           delete next[data.taskId];
@@ -336,6 +342,7 @@ export default function App() {
         break;
       case 'execution:completed':
         clearProgress(data.taskId);
+        delete logBufferRef.current[data.taskId];
         setExecStartTimes((prev) => {
           const next = { ...prev };
           delete next[data.taskId];
@@ -354,6 +361,7 @@ export default function App() {
         break;
       case 'execution:failed':
         clearProgress(data.taskId);
+        delete logBufferRef.current[data.taskId];
         setExecStartTimes((prev) => {
           const next = { ...prev };
           delete next[data.taskId];
@@ -367,6 +375,18 @@ export default function App() {
         setStatusMessage(data.aborted ? 'Task aborted' : `Execution failed: ${data.error}`);
         setTimeout(() => setStatusMessage(null), 5000);
         break;
+      case 'log:chunk': {
+        const key = data.taskId;
+        logBufferRef.current[key] = (logBufferRef.current[key] || '') + data.chunk;
+        // Throttled flush for UI update
+        if (!logFlushTimerRef.current) {
+          logFlushTimerRef.current = setTimeout(() => {
+            logFlushTimerRef.current = null;
+            setLogStreamVersion(v => v + 1);
+          }, 300);
+        }
+        break;
+      }
       case 'project:test-started':
         startTransition(() => {
           setTestStatusMap((prev) => ({
@@ -499,6 +519,10 @@ export default function App() {
       if (flushTimerRef.current != null) {
         clearTimeout(flushTimerRef.current);
         flushTimerRef.current = null;
+      }
+      if (logFlushTimerRef.current != null) {
+        clearTimeout(logFlushTimerRef.current);
+        logFlushTimerRef.current = null;
       }
     };
   }, [handleWsMessage]);
@@ -1025,6 +1049,8 @@ export default function App() {
           onMerge={handleMerge}
           onCreatePR={handleCreatePR}
           models={models}
+          streamingLog={selectedTask ? (logBufferRef.current[selectedTask.id] || '') : ''}
+          logStreamVersion={logStreamVersion}
         />
       </ErrorBoundary>
       <PlatesSpinning

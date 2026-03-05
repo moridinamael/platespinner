@@ -7,6 +7,7 @@ import { dirname, join } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '..', 'data');
 const DATA_FILE = join(DATA_DIR, 'state.json');
+export const LOGS_DIR = join(DATA_DIR, 'logs');
 
 const projects = new Map();
 const tasks = new Map();
