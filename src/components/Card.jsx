@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { EFFORT_COLORS, formatBytes, getModelLabelForTask, getModelProviderForTask } from '../utils.js';
 
-export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models }) {
+export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
@@ -30,7 +30,26 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
   const modelProvider = getModelProviderForTask(task, models);
 
   return (
-    <div className={`card card-${task.status}`} onClick={() => onSelect(task)} style={{ cursor: 'pointer' }}>
+    <div
+      className={`card card-${task.status}${isSelected ? ' card-selected' : ''}`}
+      onClick={(e) => {
+        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+          e.preventDefault();
+          onToggleSelect?.(task.id);
+        } else {
+          onSelect(task);
+        }
+      }}
+      style={{ cursor: 'pointer' }}
+    >
+      {/* Selection indicator */}
+      <div className="card-select-indicator">
+        {isSelected && (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        )}
+      </div>
       <div className="card-header">
         <span className="card-title">{task.title}</span>
         {isQueued && queuePosition && (

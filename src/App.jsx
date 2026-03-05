@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback, useRef, startTransition } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react';
 import { api, WebSocketManager } from './api.js';
 import Sidebar from './components/Sidebar.jsx';
 import GenerateBar from './components/GenerateBar.jsx';
+import FilterBar from './components/FilterBar.jsx';
 import KanbanBoard from './components/KanbanBoard.jsx';
+import BulkActionBar from './components/BulkActionBar.jsx';
 import CardModal from './components/CardModal.jsx';
 import PlatesSpinning from './components/PlatesSpinning.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
@@ -34,6 +36,10 @@ export default function App() {
   const [agentCensus, setAgentCensus] = useState(null);
   const [autoclickerStatus, setAutoclickerStatus] = useState(null);
   const [notificationSettings, setNotificationSettings] = useState(null);
+  const [filters, setFilters] = useState({
+    search: '', efforts: [], statuses: [], modelId: '', hasPlan: false, dateFrom: '', dateTo: '',
+  });
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
 
@@ -127,6 +133,12 @@ export default function App() {
         setPlanStartTimes((prev) => {
           const next = { ...prev };
           delete next[data.id];
+          return next;
+        });
+        setSelectedIds((prev) => {
+          if (!prev.has(data.id)) return prev;
+          const next = new Set(prev);
+          next.delete(data.id);
           return next;
         });
         break;
@@ -599,9 +611,124 @@ export default function App() {
     }
   };
 
-  const filteredTasks = selectedProjectId
+  // Filter persistence via localStorage
+  useEffect(() => {
+    const key = `kanban-filters-${selectedProjectId || 'all'}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      try { setFilters(JSON.parse(saved)); } catch { /* ignore */ }
+    } else {
+      setFilters({ search: '', efforts: [], statuses: [], modelId: '', hasPlan: false, dateFrom: '', dateTo: '' });
+    }
+    setSelectedIds(new Set());
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    const key = `kanban-filters-${selectedProjectId || 'all'}`;
+    localStorage.setItem(key, JSON.stringify(filters));
+  }, [filters, selectedProjectId]);
+
+  // Comprehensive filtering
+  const projectTasks = selectedProjectId
     ? tasks.filter((t) => t.projectId === selectedProjectId)
     : tasks;
+
+  const filteredTasks = useMemo(() => projectTasks.filter((t) => {
+    if (filters.search) {
+      const s = filters.search.toLowerCase();
+      const haystack = `${t.title || ''} ${t.description || ''} ${t.rationale || ''}`.toLowerCase();
+      if (!haystack.includes(s)) return false;
+    }
+    if (filters.efforts.length > 0 && !filters.efforts.includes(t.effort)) return false;
+    if (filters.statuses.length > 0 && !filters.statuses.includes(t.status)) return false;
+    if (filters.modelId) {
+      const m = filters.modelId;
+      if (t.generatedBy !== m && t.plannedBy !== m && t.executedBy !== m) return false;
+    }
+    if (filters.hasPlan && !t.plan) return false;
+    if (filters.dateFrom) {
+      const from = new Date(filters.dateFrom).getTime();
+      if ((t.createdAt || 0) < from) return false;
+    }
+    if (filters.dateTo) {
+      const to = new Date(filters.dateTo).getTime() + 86400000;
+      if ((t.createdAt || 0) >= to) return false;
+    }
+    return true;
+  }), [projectTasks, filters]);
+
+  const filterActive = !!(filters.search || filters.efforts.length || filters.statuses.length || filters.modelId || filters.hasPlan || filters.dateFrom || filters.dateTo);
+
+  // Clean up selection when filtered tasks change (remove IDs not visible)
+  useEffect(() => {
+    const visibleIds = new Set(filteredTasks.map((t) => t.id));
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [filteredTasks]);
+
+  // Selection toggle
+  const handleToggleSelect = useCallback((taskId) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }, []);
+
+  // Bulk actions
+  const handleBulkDismiss = async () => {
+    const ids = [...selectedIds].filter((id) => {
+      const t = tasks.find((t2) => t2.id === id);
+      return t && ['proposed', 'planned', 'planning', 'queued'].includes(t.status);
+    });
+    setSelectedIds(new Set());
+    for (const id of ids) {
+      try { await api.dismissTask(id); } catch (err) { console.error(err); }
+    }
+  };
+
+  const handleBulkPlan = async (modelId) => {
+    const ids = [...selectedIds].filter((id) => {
+      const t = tasks.find((t2) => t2.id === id);
+      return t && t.status === 'proposed';
+    });
+    setSelectedIds(new Set());
+    for (const id of ids) {
+      try { await api.planTask(id, modelId); } catch (err) { console.error(err); }
+    }
+  };
+
+  const handleBulkEffort = async (effort) => {
+    const ids = [...selectedIds].filter((id) => {
+      const t = tasks.find((t2) => t2.id === id);
+      return t && (t.status === 'proposed' || t.status === 'planned');
+    });
+    for (const id of ids) {
+      try { await api.updateTask(id, { effort }); } catch (err) { console.error(err); }
+    }
+    setSelectedIds(new Set());
+  };
+
+  // Keyboard shortcuts: Escape to clear selection, Ctrl+A to select all visible
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'Escape' && !selectedTask && selectedIds.size > 0) {
+        setSelectedIds(new Set());
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a' && activeTab === 'board' && !selectedTask) {
+        // Only intercept if not in an input field
+        const tag = document.activeElement?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        e.preventDefault();
+        setSelectedIds(new Set(filteredTasks.map((t) => t.id)));
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedIds.size, selectedTask, activeTab, filteredTasks]);
 
   const hasPreview = selectedProject?.url;
 
@@ -646,6 +773,11 @@ export default function App() {
           onDeleteTemplate={handleDeleteTemplate}
           models={models}
         />
+        <FilterBar
+          filters={filters}
+          onFiltersChange={setFilters}
+          models={models}
+        />
         {hasPreview && (
           <div className="tab-bar">
             <button
@@ -676,7 +808,21 @@ export default function App() {
               onDequeue={handleDequeue}
               onSelectTask={setSelectedTask}
               models={models}
+              selectedIds={selectedIds}
+              onToggleSelect={handleToggleSelect}
+              filterActive={filterActive}
             />
+            {selectedIds.size > 0 && (
+              <BulkActionBar
+                selectedIds={selectedIds}
+                tasks={tasks}
+                onDismissAll={handleBulkDismiss}
+                onPlanAll={handleBulkPlan}
+                onChangeEffort={handleBulkEffort}
+                onClearSelection={() => setSelectedIds(new Set())}
+                models={models}
+              />
+            )}
           </ErrorBoundary>
         ) : (
           <div className="preview-container">
