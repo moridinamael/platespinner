@@ -61,7 +61,7 @@ html, body {
   display: flex;
   flex-direction: column;
   padding: 24px 20px;
-  overflow-y: auto;
+  overflow: hidden;
   flex-shrink: 0;
 }
 
@@ -82,6 +82,18 @@ html, body {
   margin-bottom: 24px;
   padding-bottom: 24px;
   border-bottom: 1px solid var(--border);
+}
+
+.project-list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sidebar-bottom {
+  flex-shrink: 0;
+  overflow-y: auto;
+  max-height: 50%;
 }
 
 .input, .select {
@@ -433,7 +445,6 @@ html, body {
 
 /* ===== Sidebar Git Section ===== */
 .sidebar-git {
-  margin-top: auto;
   padding-top: 20px;
   border-top: 1px solid var(--border);
   display: flex;

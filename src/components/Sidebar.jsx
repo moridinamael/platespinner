@@ -468,42 +468,45 @@ export default function Sidebar({
         </button>
       </form>
 
-      <nav className="project-list">
-        <button
-          className={`project-item ${selectedProjectId === null ? 'active' : ''}`}
-          onClick={() => onSelectProject(null)}
-        >
-          All Projects
-        </button>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={projects.map(p => p.id)} strategy={verticalListSortingStrategy}>
-            {projects.map((p) => (
-              <SortableProjectItem
-                key={p.id}
-                project={p}
-                isActive={selectedProjectId === p.id}
-                isConfirming={confirmingProjectId === p.id}
-                statusColor={getProjectStatusColor(p.id)}
-                testStatusMap={testStatusMap}
-                railwayStatusMap={railwayStatusMap}
-                onSelect={onSelectProject}
-                onRemove={(id) => {
-                  clearTimeout(confirmTimerRef.current);
-                  setConfirmingProjectId(null);
-                  onRemoveProject(id);
-                }}
-                onConfirmStart={(id) => {
-                  setConfirmingProjectId(id);
-                  clearTimeout(confirmTimerRef.current);
-                  confirmTimerRef.current = setTimeout(() => setConfirmingProjectId(null), 3000);
-                }}
-                formatTimeAgo={formatTimeAgo}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
-      </nav>
+      <div className="project-list-scroll">
+        <nav className="project-list">
+          <button
+            className={`project-item ${selectedProjectId === null ? 'active' : ''}`}
+            onClick={() => onSelectProject(null)}
+          >
+            All Projects
+          </button>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={projects.map(p => p.id)} strategy={verticalListSortingStrategy}>
+              {projects.map((p) => (
+                <SortableProjectItem
+                  key={p.id}
+                  project={p}
+                  isActive={selectedProjectId === p.id}
+                  isConfirming={confirmingProjectId === p.id}
+                  statusColor={getProjectStatusColor(p.id)}
+                  testStatusMap={testStatusMap}
+                  railwayStatusMap={railwayStatusMap}
+                  onSelect={onSelectProject}
+                  onRemove={(id) => {
+                    clearTimeout(confirmTimerRef.current);
+                    setConfirmingProjectId(null);
+                    onRemoveProject(id);
+                  }}
+                  onConfirmStart={(id) => {
+                    setConfirmingProjectId(id);
+                    clearTimeout(confirmTimerRef.current);
+                    confirmTimerRef.current = setTimeout(() => setConfirmingProjectId(null), 3000);
+                  }}
+                  formatTimeAgo={formatTimeAgo}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
+        </nav>
+      </div>
 
+      <div className="sidebar-bottom">
       {/* Autoclicker Mode Panel */}
       <div className="sidebar-autoclicker">
         <label className="setting-field setting-field-row">
@@ -885,6 +888,7 @@ export default function Sidebar({
           )}
         </div>
       )}
+      </div>
     </aside>
   );
 }
