@@ -6,6 +6,7 @@ import { toWSLPath } from '../paths.js';
 import { detectTestFramework, runTests, validateTestCommand } from '../testing.js';
 import { runTestSetup } from '../agents/runner.js';
 import { MODELS } from '../models.js';
+import { emitNotification } from '../notifications.js';
 
 const RAILWAY_BIN = process.env.RAILWAY_BIN || 'railway';
 
@@ -184,6 +185,12 @@ router.post('/projects/:id/test', (req, res) => {
         summary: result.summary,
         output: result.output,
       });
+      if (!result.passed) {
+        emitNotification('test:failure', {
+          projectId: project.id,
+          summary: result.summary,
+        });
+      }
     })
     .catch((err) => {
       state.updateProject(project.id, { lastTestResult: { passed: false, summary: err.message || 'Test execution error', output: '', timestamp: Date.now() } });
@@ -192,6 +199,10 @@ router.post('/projects/:id/test', (req, res) => {
         passed: false,
         summary: err.message || 'Test execution error',
         output: '',
+      });
+      emitNotification('test:failure', {
+        projectId: project.id,
+        summary: err.message || 'Test execution error',
       });
     });
 });

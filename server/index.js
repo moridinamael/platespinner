@@ -12,6 +12,7 @@ import taskRoutes from './routes/tasks.js';
 import templateRoutes from './routes/templates.js';
 import agentRoutes from './routes/agents.js';
 import autoclickerRoutes from './routes/autoclicker.js';
+import notificationRoutes from './routes/notifications.js';
 import * as state from './state.js';
 import { broadcast } from './ws.js';
 
@@ -62,6 +63,7 @@ app.use('/api', taskRoutes);
 app.use('/api', templateRoutes);
 app.use('/api', agentRoutes);
 app.use('/api', autoclickerRoutes);
+app.use('/api', notificationRoutes);
 
 // Proxy for iframe preview — strips X-Frame-Options / CSP frame-ancestors
 app.get('/api/proxy', async (req, res) => {

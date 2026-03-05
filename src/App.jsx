@@ -33,6 +33,7 @@ export default function App() {
   const wsRef = useRef(null);
   const [agentCensus, setAgentCensus] = useState(null);
   const [autoclickerStatus, setAutoclickerStatus] = useState(null);
+  const [notificationSettings, setNotificationSettings] = useState(null);
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
 
@@ -74,6 +75,7 @@ export default function App() {
     api.getModels().then(setModels).catch(console.error);
     api.getAgentStatus().then(setAgentCensus).catch(console.error);
     api.getAutoclickerStatus().then(setAutoclickerStatus).catch(() => {});
+    api.getNotificationSettings().then(setNotificationSettings).catch(console.error);
     api.getTasks().then((loaded) => {
       setTasks(loaded);
       const execStarts = {};
@@ -386,6 +388,32 @@ export default function App() {
           setAgentCensus(data);
         });
         break;
+      case 'notification': {
+        // Trigger browser Notification API if permission granted and document is hidden
+        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+          const titleMap = {
+            'task:completed': 'Task Completed',
+            'task:failed': 'Task Failed',
+            'all-tasks:done': 'All Tasks Done!',
+            'test:failure': 'Tests Failed',
+            'budget:exceeded': 'Budget Exceeded',
+            'test:notification': 'Test Notification',
+          };
+          const title = titleMap[data.type] || 'Kanban Notification';
+          const body = data.taskTitle || data.summary || data.message || '';
+          new Notification(title, {
+            body: `${data.projectName}: ${body}`,
+            tag: `kanban-${data.type}-${data.taskId || data.projectId}`,
+            requireInteraction: data.type === 'all-tasks:done',
+          });
+        }
+        break;
+      }
+      case 'notification-settings:updated':
+        if (!data.projectId || data.projectId === 'global') {
+          setNotificationSettings(data.settings);
+        }
+        break;
       case 'autoclicker:started':
       case 'autoclicker:stopped':
       case 'autoclicker:decision':
@@ -535,6 +563,30 @@ export default function App() {
     }
   };
 
+  const handleUpdateNotificationSettings = async (updates) => {
+    try {
+      const updated = await api.updateNotificationSettings(null, updates);
+      setNotificationSettings(updated);
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  };
+
+  const handleTestNotification = async () => {
+    try {
+      await api.testNotification();
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  };
+
+  const handleRequestNotificationPermission = async () => {
+    if (!('Notification' in window)) return;
+    await Notification.requestPermission();
+  };
+
   const handleStopAutoclicker = async () => {
     try {
       await api.stopAutoclicker();
@@ -570,6 +622,10 @@ export default function App() {
           autoclickerStatus={autoclickerStatus}
           onStartAutoclicker={handleStartAutoclicker}
           onStopAutoclicker={handleStopAutoclicker}
+          notificationSettings={notificationSettings}
+          onUpdateNotificationSettings={handleUpdateNotificationSettings}
+          onTestNotification={handleTestNotification}
+          onRequestNotificationPermission={handleRequestNotificationPermission}
         />
       </ErrorBoundary>
       <main className="main">

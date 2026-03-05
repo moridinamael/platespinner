@@ -9,6 +9,7 @@ import { DEFAULT_MODEL_ID } from '../models.js';
 import { runTests, validateTestCommand } from '../testing.js';
 import * as state from '../state.js';
 import { registerAgent, unregisterAgent } from '../census.js';
+import { emitNotification, checkAllTasksDone } from '../notifications.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
 
@@ -258,6 +259,13 @@ export async function runPlanning(task, modelId) {
     if (state.getTask(task.id)) {
       state.updateTask(task.id, { status: 'proposed', agentLog: err.message });
       broadcast('planning:failed', { taskId: task.id, error: err.message });
+      emitNotification('task:failed', {
+        projectId: project.id,
+        taskId: task.id,
+        taskTitle: task.title,
+        error: err.message,
+        phase: 'planning',
+      });
     }
     throw err;
   } finally {
@@ -305,13 +313,36 @@ export async function runExecution(task, modelId) {
     const updated = state.updateTask(task.id, updates);
     broadcast('execution:completed', { taskId: task.id, ...updates, result });
 
+    emitNotification('task:completed', {
+      projectId: project.id,
+      taskId: task.id,
+      taskTitle: task.title,
+      commitHash: result.commitHash || null,
+    });
+    if (checkAllTasksDone(project.id)) {
+      emitNotification('all-tasks:done', {
+        projectId: project.id,
+        taskCount: state.getTasks(project.id).length,
+      });
+    }
+
     // Auto-test after execution commit if enabled
     if (result.commitHash && project.autoTestOnCommit) {
       broadcast('project:test-started', { projectId: project.id });
       runTests(project).then((testResult) => {
         broadcast('project:test-completed', { projectId: project.id, passed: testResult.passed, summary: testResult.summary, output: testResult.output });
+        if (!testResult.passed) {
+          emitNotification('test:failure', {
+            projectId: project.id,
+            summary: testResult.summary,
+          });
+        }
       }).catch((err) => {
         broadcast('project:test-completed', { projectId: project.id, passed: false, summary: err.message || 'Auto-test failed', output: '' });
+        emitNotification('test:failure', {
+          projectId: project.id,
+          summary: err.message || 'Auto-test failed',
+        });
       });
     }
 
@@ -324,6 +355,13 @@ export async function runExecution(task, modelId) {
       : `Execution failed (agent exited unexpectedly). The previous agent may have left partial changes in the working directory. Error: ${err.message}`;
     state.updateTask(task.id, { status: revertStatus, agentLog });
     broadcast('execution:failed', { taskId: task.id, error: agentLog, aborted, status: revertStatus });
+    emitNotification('task:failed', {
+      projectId: project.id,
+      taskId: task.id,
+      taskTitle: task.title,
+      error: agentLog,
+      aborted,
+    });
     if (!aborted) throw err;
   } finally {
     state.removeProcess(task.id);

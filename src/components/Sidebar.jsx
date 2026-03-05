@@ -18,6 +18,10 @@ export default function Sidebar({
   autoclickerStatus,
   onStartAutoclicker,
   onStopAutoclicker,
+  notificationSettings,
+  onUpdateNotificationSettings,
+  onTestNotification,
+  onRequestNotificationPermission,
 }) {
   const [path, setPath] = useState('');
   const [pushing, setPushing] = useState(null);
@@ -32,6 +36,8 @@ export default function Sidebar({
   const [railwayInput, setRailwayInput] = useState('');
   const [confirmingProjectId, setConfirmingProjectId] = useState(null);
   const confirmTimerRef = useRef(null);
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
+  const [webhookUrlLocal, setWebhookUrlLocal] = useState('');
 
   // Autoclicker local state
   const [acEnabled, setAcEnabled] = useState(false);
@@ -86,6 +92,12 @@ export default function Sidebar({
       if (autoclickerStatus.maxParallel) setAcMaxParallel(autoclickerStatus.maxParallel);
     }
   }, [autoclickerStatus]);
+
+  useEffect(() => {
+    if (notificationSettings) {
+      setWebhookUrlLocal(notificationSettings.webhookUrl === '****' ? '****' : (notificationSettings.webhookUrl || ''));
+    }
+  }, [notificationSettings?.webhookUrl]);
 
   useEffect(() => () => clearTimeout(confirmTimerRef.current), []);
 
@@ -184,6 +196,124 @@ export default function Sidebar({
   return (
     <aside className="sidebar">
       <h1 className="sidebar-title">Kanban Agents</h1>
+
+      <button
+        className="btn btn-sm btn-notif-toggle"
+        onClick={() => setShowNotifSettings((prev) => !prev)}
+        title="Notification settings"
+      >
+        Notifications {notificationSettings?.enabled ? '(on)' : '(off)'}
+      </button>
+
+      {showNotifSettings && notificationSettings && (
+        <div className="sidebar-notifications">
+          <label className="setting-field setting-field-row">
+            <input
+              type="checkbox"
+              className="setting-checkbox"
+              checked={!!notificationSettings.enabled}
+              onChange={(e) => onUpdateNotificationSettings({ enabled: e.target.checked })}
+            />
+            <span className="setting-label">Enable notifications</span>
+          </label>
+
+          {notificationSettings.enabled && (
+            <>
+              <label className="setting-field setting-field-row">
+                <input
+                  type="checkbox"
+                  className="setting-checkbox"
+                  checked={!!notificationSettings.browserNotifications}
+                  onChange={(e) => {
+                    if (e.target.checked && 'Notification' in window && Notification.permission === 'default') {
+                      onRequestNotificationPermission();
+                    }
+                    onUpdateNotificationSettings({ browserNotifications: e.target.checked });
+                  }}
+                />
+                <span className="setting-label">Browser notifications</span>
+              </label>
+              {'Notification' in window && notificationSettings.browserNotifications && Notification.permission !== 'granted' && (
+                <button className="btn btn-sm" onClick={onRequestNotificationPermission}>
+                  Grant Permission
+                </button>
+              )}
+
+              <label className="setting-field setting-field-row">
+                <input
+                  type="checkbox"
+                  className="setting-checkbox"
+                  checked={!!notificationSettings.desktopNotifications}
+                  onChange={(e) => onUpdateNotificationSettings({ desktopNotifications: e.target.checked })}
+                />
+                <span className="setting-label">Desktop notifications</span>
+              </label>
+
+              <label className="setting-field">
+                <span className="setting-label">Webhook URL</span>
+                <input
+                  type="text"
+                  className="input input-sm"
+                  placeholder="https://hooks.slack.com/..."
+                  value={webhookUrlLocal}
+                  onChange={(e) => setWebhookUrlLocal(e.target.value)}
+                  onBlur={(e) => {
+                    const val = e.target.value.trim();
+                    if (val !== (notificationSettings.webhookUrl || '')) {
+                      onUpdateNotificationSettings({ webhookUrl: val });
+                    }
+                  }}
+                />
+              </label>
+
+              {notificationSettings.webhookUrl && (
+                <label className="setting-field">
+                  <span className="setting-label">Webhook Secret (optional)</span>
+                  <input
+                    type="password"
+                    className="input input-sm"
+                    placeholder="HMAC signing key"
+                    defaultValue=""
+                    onBlur={(e) => {
+                      if (e.target.value) {
+                        onUpdateNotificationSettings({ webhookSecret: e.target.value });
+                      }
+                    }}
+                  />
+                </label>
+              )}
+
+              <div className="notif-events-section">
+                <span className="setting-label">Events</span>
+                {[
+                  ['taskCompleted', 'Task completed'],
+                  ['taskFailed', 'Task failed'],
+                  ['allTasksDone', 'All tasks done'],
+                  ['testFailure', 'Test failure'],
+                ].map(([key, label]) => (
+                  <label key={key} className="setting-field setting-field-row">
+                    <input
+                      type="checkbox"
+                      className="setting-checkbox"
+                      checked={!!notificationSettings.events?.[key]}
+                      onChange={(e) =>
+                        onUpdateNotificationSettings({
+                          events: { [key]: e.target.checked },
+                        })
+                      }
+                    />
+                    <span className="setting-label">{label}</span>
+                  </label>
+                ))}
+              </div>
+
+              <button className="btn btn-sm" onClick={onTestNotification}>
+                Send Test Notification
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <form className="add-project-form" onSubmit={handleSubmit}>
         <input

@@ -462,6 +462,50 @@ html, body {
   overflow-y: auto;
 }
 
+/* ===== Notification Settings ===== */
+.btn-notif-toggle {
+  margin-bottom: 16px;
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-notif-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.sidebar-notifications {
+  padding: 12px 0 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.notif-events-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 4px;
+}
+
+.notif-events-section > .setting-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
 .sidebar-project-settings {
   padding-top: 16px;
   border-top: 1px solid var(--border);

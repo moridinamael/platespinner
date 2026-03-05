@@ -11,6 +11,7 @@ const DATA_FILE = join(DATA_DIR, 'state.json');
 const projects = new Map();
 const tasks = new Map();
 const promptTemplates = new Map();
+const notificationSettings = new Map(); // projectId|'global' → settings
 const runningProcesses = new Map(); // taskId → ChildProcess
 const projectLocks = new Set();     // projectIds currently executing
 const executionQueues = new Map();  // projectId → taskId[]
@@ -40,6 +41,7 @@ function _serialize() {
     projects: [...projects.values()],
     tasks: [...tasks.values()],
     promptTemplates: [...promptTemplates.values()],
+    notificationSettings: Object.fromEntries(notificationSettings),
     executionQueues: Object.fromEntries(executionQueues),
     autoclicker: {
       enabled: autoclickerConfig.enabled,
@@ -100,6 +102,11 @@ function load() {
     for (const p of data.projects || []) projects.set(p.id, p);
     for (const t of data.tasks || []) tasks.set(t.id, t);
     for (const pt of data.promptTemplates || []) promptTemplates.set(pt.id, pt);
+    if (data.notificationSettings) {
+      for (const [key, val] of Object.entries(data.notificationSettings)) {
+        notificationSettings.set(key, val);
+      }
+    }
     if (data.executionQueues) {
       for (const [projectId, queue] of Object.entries(data.executionQueues)) {
         if (Array.isArray(queue) && queue.length > 0) {
@@ -385,6 +392,38 @@ export function getTaskQueuePosition(taskId) {
     if (idx !== -1) return { projectId, position: idx + 1, total: queue.length };
   }
   return null;
+}
+
+// --- Notification Settings ---
+
+function defaultNotificationSettings() {
+  return {
+    enabled: false,
+    browserNotifications: true,
+    webhookUrl: '',
+    webhookSecret: '',
+    desktopNotifications: false,
+    events: {
+      taskCompleted: true,
+      taskFailed: true,
+      allTasksDone: true,
+      testFailure: true,
+      budgetExceeded: false,
+    },
+  };
+}
+
+export function getNotificationSettings(projectId) {
+  return notificationSettings.get(projectId || 'global') || defaultNotificationSettings();
+}
+
+export function updateNotificationSettings(projectId, updates) {
+  const current = getNotificationSettings(projectId);
+  const merged = { ...current, ...updates };
+  if (updates.events) merged.events = { ...current.events, ...updates.events };
+  notificationSettings.set(projectId || 'global', merged);
+  save();
+  return merged;
 }
 
 // --- Autoclicker Config & State ---
