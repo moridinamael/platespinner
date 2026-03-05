@@ -63,6 +63,16 @@ router.get('/models', (req, res) => {
   res.json(MODELS);
 });
 
+router.patch('/projects/reorder', (req, res) => {
+  const { orderedIds } = req.body;
+  if (!Array.isArray(orderedIds)) {
+    return res.status(400).json({ error: 'orderedIds must be an array' });
+  }
+  state.reorderProjects(orderedIds);
+  broadcast('projects:reordered', { orderedIds });
+  res.json({ success: true });
+});
+
 router.patch('/projects/:id', (req, res) => {
   const project = state.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });

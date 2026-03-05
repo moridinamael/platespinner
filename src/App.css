@@ -398,6 +398,39 @@ html, body {
   animation: fade-in 0.15s;
 }
 
+/* ===== Drag & Drop ===== */
+.drag-handle {
+  display: flex;
+  align-items: center;
+  cursor: grab;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 0 2px;
+  flex-shrink: 0;
+  user-select: none;
+  touch-action: none;
+}
+
+.drag-handle:hover {
+  color: var(--text-muted);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.project-item-dragging {
+  opacity: 0.5;
+  background: var(--surface-2);
+}
+
+.project-item-overlay {
+  background: var(--surface-3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  border-radius: var(--radius-sm);
+  transform: scale(1.02);
+}
+
 /* ===== Sidebar Git Section ===== */
 .sidebar-git {
   margin-top: auto;

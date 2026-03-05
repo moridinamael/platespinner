@@ -1,7 +1,98 @@
 import { useState, useEffect, useRef } from 'react';
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { api } from '../api.js';
 import { EFFORT_COLORS, formatCost } from '../utils.js';
 import Sparkline from './Sparkline.jsx';
+
+function SortableProjectItem({ project, isActive, isConfirming, statusColor, testStatusMap, railwayStatusMap, onSelect, onRemove, onConfirmStart, formatTimeAgo }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: project.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+
+  const p = project;
+  const ts = testStatusMap[p.id];
+  const rs = railwayStatusMap[p.id];
+  const rr = rs && rs.status !== 'unknown' && rs.status !== 'checking'
+    ? { healthy: rs.status === 'healthy', message: rs.message, checkedAt: rs.checkedAt }
+    : null;
+  const isTestRunning = !!ts?.running;
+  const isRailwayChecking = rs?.status === 'checking';
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`project-item ${isActive ? 'active' : ''} ${isDragging ? 'project-item-dragging' : ''}`}
+    >
+      <span className="drag-handle" {...attributes} {...listeners}>
+        ⠿
+      </span>
+      <button className="project-btn" onClick={() => onSelect(p.id)}>
+        <span className="status-dot-wrapper">
+          <span className={`status-dot status-dot-${statusColor}`} />
+          <span className="status-tooltip">
+            <span className="status-tooltip-row">
+              <span className="status-tooltip-label">Tests:</span>
+              <span className={`status-tooltip-value ${
+                isTestRunning ? 'status-running' :
+                ts?.result ? (ts.result.passed ? 'status-ok' : 'status-err') : ''
+              }`}>
+                {isTestRunning ? 'running...' :
+                 ts?.result ? ts.result.summary : 'not run'}
+              </span>
+            </span>
+            {(p.railwayProject || rr) && (
+              <span className="status-tooltip-row">
+                <span className="status-tooltip-label">Railway:</span>
+                <span className={`status-tooltip-value ${
+                  isRailwayChecking ? 'status-running' :
+                  rr ? (rr.healthy ? 'status-ok' : 'status-err') : ''
+                }`}>
+                  {isRailwayChecking ? 'checking...' :
+                   rr ? rr.message : 'not checked'}
+                </span>
+              </span>
+            )}
+            {(ts?.result?.checkedAt || rr?.checkedAt) && (
+              <span className="status-tooltip-time">
+                {formatTimeAgo(Math.max(ts?.result?.checkedAt || 0, rr?.checkedAt || 0))}
+              </span>
+            )}
+          </span>
+        </span>
+        <span className="project-name">{p.name}</span>
+      </button>
+      <button
+        className={`project-remove${isConfirming ? ' confirming' : ''}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (isConfirming) {
+            onRemove(p.id);
+          } else {
+            onConfirmStart(p.id);
+          }
+        }}
+        title={isConfirming ? 'Click again to confirm' : 'Remove project'}
+      >
+        {isConfirming ? 'Sure?' : '\u00d7'}
+      </button>
+    </div>
+  );
+}
 
 export default function Sidebar({
   projects,
@@ -24,6 +115,7 @@ export default function Sidebar({
   onUpdateNotificationSettings,
   onTestNotification,
   onRequestNotificationPermission,
+  onReorderProjects,
   tasks,
 }) {
   const [path, setPath] = useState('');
@@ -105,6 +197,23 @@ export default function Sidebar({
   }, [notificationSettings?.webhookUrl]);
 
   useEffect(() => () => clearTimeout(confirmTimerRef.current), []);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const handleDragEnd = (event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = projects.findIndex(p => p.id === active.id);
+    const newIndex = projects.findIndex(p => p.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = [...projects];
+    const [moved] = reordered.splice(oldIndex, 1);
+    reordered.splice(newIndex, 0, moved);
+    onReorderProjects(reordered.map(p => p.id));
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -366,73 +475,33 @@ export default function Sidebar({
         >
           All Projects
         </button>
-        {projects.map((p) => {
-          const statusColor = getProjectStatusColor(p.id);
-          const ts = testStatusMap[p.id];
-          const rs = railwayStatusMap[p.id];
-          const rr = rs && rs.status !== 'unknown' && rs.status !== 'checking'
-            ? { healthy: rs.status === 'healthy', message: rs.message, checkedAt: rs.checkedAt }
-            : null;
-          const isTestRunning = !!ts?.running;
-          const isRailwayChecking = rs?.status === 'checking';
-          return (
-          <div key={p.id} className={`project-item ${selectedProjectId === p.id ? 'active' : ''}`}>
-            <button className="project-btn" onClick={() => onSelectProject(p.id)}>
-              <span className="status-dot-wrapper">
-                <span className={`status-dot status-dot-${statusColor}`} />
-                <span className="status-tooltip">
-                  <span className="status-tooltip-row">
-                    <span className="status-tooltip-label">Tests:</span>
-                    <span className={`status-tooltip-value ${
-                      isTestRunning ? 'status-running' :
-                      ts?.result ? (ts.result.passed ? 'status-ok' : 'status-err') : ''
-                    }`}>
-                      {isTestRunning ? 'running...' :
-                       ts?.result ? ts.result.summary : 'not run'}
-                    </span>
-                  </span>
-                  {(p.railwayProject || rr) && (
-                    <span className="status-tooltip-row">
-                      <span className="status-tooltip-label">Railway:</span>
-                      <span className={`status-tooltip-value ${
-                        isRailwayChecking ? 'status-running' :
-                        rr ? (rr.healthy ? 'status-ok' : 'status-err') : ''
-                      }`}>
-                        {isRailwayChecking ? 'checking...' :
-                         rr ? rr.message : 'not checked'}
-                      </span>
-                    </span>
-                  )}
-                  {(ts?.result?.checkedAt || rr?.checkedAt) && (
-                    <span className="status-tooltip-time">
-                      {formatTimeAgo(Math.max(ts?.result?.checkedAt || 0, rr?.checkedAt || 0))}
-                    </span>
-                  )}
-                </span>
-              </span>
-              <span className="project-name">{p.name}</span>
-            </button>
-            <button
-              className={`project-remove${confirmingProjectId === p.id ? ' confirming' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (confirmingProjectId === p.id) {
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={projects.map(p => p.id)} strategy={verticalListSortingStrategy}>
+            {projects.map((p) => (
+              <SortableProjectItem
+                key={p.id}
+                project={p}
+                isActive={selectedProjectId === p.id}
+                isConfirming={confirmingProjectId === p.id}
+                statusColor={getProjectStatusColor(p.id)}
+                testStatusMap={testStatusMap}
+                railwayStatusMap={railwayStatusMap}
+                onSelect={onSelectProject}
+                onRemove={(id) => {
                   clearTimeout(confirmTimerRef.current);
                   setConfirmingProjectId(null);
-                  onRemoveProject(p.id);
-                } else {
-                  setConfirmingProjectId(p.id);
+                  onRemoveProject(id);
+                }}
+                onConfirmStart={(id) => {
+                  setConfirmingProjectId(id);
                   clearTimeout(confirmTimerRef.current);
                   confirmTimerRef.current = setTimeout(() => setConfirmingProjectId(null), 3000);
-                }
-              }}
-              title={confirmingProjectId === p.id ? 'Click again to confirm' : 'Remove project'}
-            >
-              {confirmingProjectId === p.id ? 'Sure?' : '\u00d7'}
-            </button>
-          </div>
-          );
-        })}
+                }}
+                formatTimeAgo={formatTimeAgo}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
       </nav>
 
       {/* Autoclicker Mode Panel */}

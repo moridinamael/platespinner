@@ -123,6 +123,19 @@ function load() {
       autoclickerConfig.running = false; // Never auto-resume
     }
 
+    // Backfill sortOrder for existing projects missing it
+    let needsSortBackfill = false;
+    for (const p of projects.values()) {
+      if (p.sortOrder == null) { needsSortBackfill = true; break; }
+    }
+    if (needsSortBackfill) {
+      let idx = 0;
+      for (const p of projects.values()) {
+        if (p.sortOrder == null) p.sortOrder = idx;
+        idx++;
+      }
+    }
+
     console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from disk`);
 
     // Recover tasks stuck in transient states from a previous server crash
@@ -157,7 +170,7 @@ load();
 
 export function addProject({ name, path, url, testCommand }) {
   const id = randomUUID();
-  const project = { id, name: name || path.split('/').filter(Boolean).pop(), path, url: url || null, testCommand: testCommand || null, autoTestOnCommit: false, lastTestResult: null, lastRailwayResult: null, budgetLimitUsd: null, branchStrategy: 'direct' };
+  const project = { id, name: name || path.split('/').filter(Boolean).pop(), path, url: url || null, testCommand: testCommand || null, autoTestOnCommit: false, lastTestResult: null, lastRailwayResult: null, budgetLimitUsd: null, branchStrategy: 'direct', sortOrder: projects.size };
   projects.set(id, project);
   save();
   return project;
@@ -172,7 +185,15 @@ export function updateProject(id, updates) {
 }
 
 export function getProjects() {
-  return [...projects.values()];
+  return [...projects.values()].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+}
+
+export function reorderProjects(orderedIds) {
+  for (let i = 0; i < orderedIds.length; i++) {
+    const project = projects.get(orderedIds[i]);
+    if (project) project.sortOrder = i;
+  }
+  save();
 }
 
 export function getProject(id) {

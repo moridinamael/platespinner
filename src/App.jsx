@@ -121,6 +121,16 @@ export default function App() {
         setTestStatusMap((prev) => { const next = { ...prev }; delete next[data.id]; return next; });
         setRailwayStatusMap((prev) => { const next = { ...prev }; delete next[data.id]; return next; });
         break;
+      case 'projects:reordered': {
+        const { orderedIds } = data;
+        setProjects((prev) => {
+          const map = new Map(prev.map(p => [p.id, p]));
+          const reordered = orderedIds.map(id => map.get(id)).filter(Boolean);
+          const remaining = prev.filter(p => !orderedIds.includes(p.id));
+          return [...reordered, ...remaining];
+        });
+        break;
+      }
       case 'task:created':
         setTasks((prev) => [...prev, data]);
         break;
@@ -629,6 +639,20 @@ export default function App() {
     }
   };
 
+  const handleReorderProjects = async (orderedIds) => {
+    setProjects((prev) => {
+      const map = new Map(prev.map(p => [p.id, p]));
+      return orderedIds.map(id => map.get(id)).filter(Boolean);
+    });
+    try {
+      await api.reorderProjects(orderedIds);
+    } catch (err) {
+      api.getProjects().then(setProjects).catch(console.error);
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  };
+
   const handleStopAutoclicker = async () => {
     try {
       await api.stopAutoclicker();
@@ -783,6 +807,7 @@ export default function App() {
           onUpdateNotificationSettings={handleUpdateNotificationSettings}
           onTestNotification={handleTestNotification}
           onRequestNotificationPermission={handleRequestNotificationPermission}
+          onReorderProjects={handleReorderProjects}
           tasks={tasks}
         />
       </ErrorBoundary>
