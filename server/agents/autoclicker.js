@@ -39,9 +39,17 @@ async function _runJudgmentAgent(project, tasks, templates, gitLog, testResult) 
   try {
     const stdout = await promise;
     const extracted = extractClaudeJsonOutput(stdout);
-    return parseJudgmentOutput(extracted.text);
+    const decision = parseJudgmentOutput(extracted.text);
+    decision.costData = {
+      costUsd: extracted.costUsd,
+      inputTokens: extracted.inputTokens,
+      outputTokens: extracted.outputTokens,
+      durationMs: extracted.durationMs,
+      numTurns: extracted.numTurns,
+    };
+    return decision;
   } catch (err) {
-    return { action: 'skip', reasoning: `Judgment agent failed: ${err.message}` };
+    return { action: 'skip', reasoning: `Judgment agent failed: ${err.message}`, costData: null };
   }
 }
 
@@ -58,6 +66,7 @@ async function _runProjectCycle(project) {
     broadcast('autoclicker:phase', { projectId: project.id, phase: 'judging' });
 
     const decision = await _runJudgmentAgent(project, tasks, templates, gitLog, testResult);
+    const judgmentCost = decision.costData || null;
 
     state.addAuditEntry({
       projectId: project.id,
@@ -65,8 +74,30 @@ async function _runProjectCycle(project) {
       targetTaskId: decision.targetTaskId || null,
       templateId: decision.templateId || null,
       reasoning: decision.reasoning,
+      costUsd: judgmentCost?.costUsd || null,
+      inputTokens: judgmentCost?.inputTokens || null,
+      outputTokens: judgmentCost?.outputTokens || null,
+      durationMs: judgmentCost?.durationMs || null,
     });
-    broadcast('autoclicker:decision', { projectId: project.id, decision });
+    broadcast('autoclicker:decision', { projectId: project.id, decision, costUsd: judgmentCost?.costUsd || null });
+
+    // Attribute judgment cost to target task when applicable
+    if (judgmentCost?.costUsd && decision.targetTaskId) {
+      const targetTask = state.getTask(decision.targetTaskId);
+      if (targetTask) {
+        const existingCost = targetTask.costUsd || 0;
+        state.updateTask(decision.targetTaskId, {
+          tokenUsage: {
+            ...(targetTask.tokenUsage || {}),
+            judgment: {
+              input: judgmentCost.inputTokens,
+              output: judgmentCost.outputTokens,
+            },
+          },
+          costUsd: existingCost + judgmentCost.costUsd,
+        });
+      }
+    }
 
     if (decision.action === 'skip') {
       projectCycleStatus.set(project.id, 'idle');

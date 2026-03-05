@@ -497,8 +497,8 @@ export function setAutoclickerConfig(updates) {
 
 const AUDIT_LOG_MAX = 500;
 
-export function addAuditEntry({ projectId, action, targetTaskId, templateId, reasoning }) {
-  const entry = { timestamp: Date.now(), projectId, action, targetTaskId: targetTaskId || null, templateId: templateId || null, reasoning: reasoning || '' };
+export function addAuditEntry({ projectId, action, targetTaskId, templateId, reasoning, costUsd, inputTokens, outputTokens, durationMs }) {
+  const entry = { timestamp: Date.now(), projectId, action, targetTaskId: targetTaskId || null, templateId: templateId || null, reasoning: reasoning || '', costUsd: costUsd || null, inputTokens: inputTokens || null, outputTokens: outputTokens || null, durationMs: durationMs || null };
   autoclickerAuditLog.push(entry);
   if (autoclickerAuditLog.length > AUDIT_LOG_MAX) {
     autoclickerAuditLog.splice(0, autoclickerAuditLog.length - AUDIT_LOG_MAX);
