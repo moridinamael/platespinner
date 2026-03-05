@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, startTransition } from 'react';
 import { api, WebSocketManager } from './api.js';
 import Sidebar from './components/Sidebar.jsx';
 import GenerateBar from './components/GenerateBar.jsx';
@@ -137,10 +137,12 @@ export default function App() {
         }));
         break;
       case 'generation:progress':
-        setGeneratingMap((prev) => ({
-          ...prev,
-          [data.projectId]: { ...prev[data.projectId], bytesReceived: data.bytesReceived },
-        }));
+        startTransition(() => {
+          setGeneratingMap((prev) => ({
+            ...prev,
+            [data.projectId]: { ...prev[data.projectId], bytesReceived: data.bytesReceived },
+          }));
+        });
         break;
       case 'generation:completed': {
         setGeneratingMap((prev) => {
@@ -173,9 +175,11 @@ export default function App() {
         );
         break;
       case 'planning:progress':
-        setTasks((prev) =>
-          prev.map((t) => (t.id === data.taskId ? { ...t, progress: data.bytesReceived } : t))
-        );
+        startTransition(() => {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === data.taskId ? { ...t, progress: data.bytesReceived } : t))
+          );
+        });
         break;
       case 'planning:completed':
         setPlanStartTimes((prev) => {
@@ -214,9 +218,11 @@ export default function App() {
         );
         break;
       case 'execution:progress':
-        setTasks((prev) =>
-          prev.map((t) => (t.id === data.taskId ? { ...t, progress: data.bytesReceived } : t))
-        );
+        startTransition(() => {
+          setTasks((prev) =>
+            prev.map((t) => (t.id === data.taskId ? { ...t, progress: data.bytesReceived } : t))
+          );
+        });
         break;
       case 'execution:git':
         setTasks((prev) =>
@@ -296,35 +302,43 @@ export default function App() {
         setTimeout(() => setStatusMessage(null), 5000);
         break;
       case 'project:test-started':
-        setTestStatusMap((prev) => ({
-          ...prev,
-          [data.projectId]: { running: true },
-        }));
+        startTransition(() => {
+          setTestStatusMap((prev) => ({
+            ...prev,
+            [data.projectId]: { running: true },
+          }));
+        });
         break;
       case 'project:test-completed':
-        setTestStatusMap((prev) => ({
-          ...prev,
-          [data.projectId]: {
-            running: false,
-            result: { passed: data.passed, summary: data.summary, output: data.output, checkedAt: Date.now() },
-          },
-        }));
+        startTransition(() => {
+          setTestStatusMap((prev) => ({
+            ...prev,
+            [data.projectId]: {
+              running: false,
+              result: { passed: data.passed, summary: data.summary, output: data.output, checkedAt: Date.now() },
+            },
+          }));
+        });
         break;
       case 'project:railway-checking':
-        setRailwayStatusMap((prev) => ({
-          ...prev,
-          [data.projectId]: { ...prev[data.projectId], status: 'checking' },
-        }));
+        startTransition(() => {
+          setRailwayStatusMap((prev) => ({
+            ...prev,
+            [data.projectId]: { ...prev[data.projectId], status: 'checking' },
+          }));
+        });
         break;
       case 'project:railway-status':
-        setRailwayStatusMap((prev) => ({
-          ...prev,
-          [data.projectId]: {
-            status: data.healthy ? 'healthy' : 'failed',
-            message: data.message,
-            checkedAt: data.timestamp || Date.now(),
-          },
-        }));
+        startTransition(() => {
+          setRailwayStatusMap((prev) => ({
+            ...prev,
+            [data.projectId]: {
+              status: data.healthy ? 'healthy' : 'failed',
+              message: data.message,
+              checkedAt: data.timestamp || Date.now(),
+            },
+          }));
+        });
         break;
       case 'setup-tests:started':
         setSetupMap((prev) => ({
@@ -338,10 +352,12 @@ export default function App() {
         });
         break;
       case 'setup-tests:progress':
-        setSetupMap((prev) => ({
-          ...prev,
-          [data.projectId]: { ...prev[data.projectId], bytesReceived: data.bytesReceived },
-        }));
+        startTransition(() => {
+          setSetupMap((prev) => ({
+            ...prev,
+            [data.projectId]: { ...prev[data.projectId], bytesReceived: data.bytesReceived },
+          }));
+        });
         break;
       case 'setup-tests:completed':
         setSetupMap((prev) => {
@@ -366,7 +382,9 @@ export default function App() {
         }));
         break;
       case 'agents:census':
-        setAgentCensus(data);
+        startTransition(() => {
+          setAgentCensus(data);
+        });
         break;
       case 'autoclicker:started':
       case 'autoclicker:stopped':
