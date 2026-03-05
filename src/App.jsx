@@ -500,40 +500,40 @@ export default function App() {
     };
   }, [handleWsMessage]);
 
-  const handleAddProject = async ({ name, path }) => {
+  const handleAddProject = useCallback(async ({ name, path }) => {
     try {
       await api.addProject({ name, path });
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handleRemoveProject = async (id) => {
+  const handleRemoveProject = useCallback(async (id) => {
     try {
       await api.removeProject(id);
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
     }
-  };
+  }, []);
 
-  const handleUpdateProjectUrl = async (id, url) => {
+  const handleUpdateProjectUrl = useCallback(async (id, url) => {
     try {
       await api.updateProject(id, { url });
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
     }
-  };
+  }, []);
 
-  const handleGenerate = async (modelId, promptContent) => {
+  const handleGenerate = useCallback(async (modelId, promptContent) => {
     try {
       await api.generate(selectedProjectId, selectedTemplateId, modelId, promptContent);
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
     }
-  };
+  }, [selectedProjectId, selectedTemplateId]);
 
-  const handleCreateTemplate = async ({ name, content }) => {
+  const handleCreateTemplate = useCallback(async ({ name, content }) => {
     try {
       const created = await api.createTemplate({ name, content });
       setTemplates((prev) => [...prev, created]);
@@ -542,55 +542,55 @@ export default function App() {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handleDeleteTemplate = async (id) => {
+  const handleDeleteTemplate = useCallback(async (id) => {
     try {
       await api.deleteTemplate(id);
       setTemplates((prev) => prev.filter((t) => t.id !== id));
-      if (selectedTemplateId === id) setSelectedTemplateId('builtin:pareto-simple');
+      setSelectedTemplateId((prev) => (prev === id ? 'builtin:pareto-simple' : prev));
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handlePlan = async (taskId, modelId) => {
+  const handlePlan = useCallback(async (taskId, modelId) => {
     try {
       await api.planTask(taskId, modelId);
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handleExecute = async (taskId, modelId) => {
+  const handleExecute = useCallback(async (taskId, modelId) => {
     try {
       await api.executeTask(taskId, modelId);
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handleDismiss = async (taskId) => {
+  const handleDismiss = useCallback(async (taskId) => {
     try {
       await api.dismissTask(taskId);
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
     }
-  };
+  }, []);
 
-  const handleAbort = async (taskId) => {
+  const handleAbort = useCallback(async (taskId) => {
     try {
       await api.abortTask(taskId);
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handleUpdateTask = async (taskId, updates) => {
+  const handleUpdateTask = useCallback(async (taskId, updates) => {
     try {
       const updated = await api.updateTask(taskId, updates);
       setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
@@ -599,36 +599,36 @@ export default function App() {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handleDequeue = async (taskId) => {
+  const handleDequeue = useCallback(async (taskId) => {
     try {
       await api.dequeueTask(taskId);
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handleCreateFixTask = async (projectId, summary, output) => {
+  const handleCreateFixTask = useCallback(async (projectId, summary, output) => {
     try {
       await api.createFixTask(projectId, { summary, output });
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handleStartAutoclicker = async (config) => {
+  const handleStartAutoclicker = useCallback(async (config) => {
     try {
       await api.startAutoclicker(config);
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handleUpdateNotificationSettings = async (updates) => {
+  const handleUpdateNotificationSettings = useCallback(async (updates) => {
     try {
       const updated = await api.updateNotificationSettings(null, updates);
       setNotificationSettings(updated);
@@ -636,21 +636,21 @@ export default function App() {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handleTestNotification = async () => {
+  const handleTestNotification = useCallback(async () => {
     try {
       await api.testNotification();
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
-  const handleRequestNotificationPermission = async () => {
+  const handleRequestNotificationPermission = useCallback(async () => {
     if (!('Notification' in window)) return;
     await Notification.requestPermission();
-  };
+  }, []);
 
   const handleMerge = async (taskId, strategy) => {
     const task = tasks.find(t => t.id === taskId);
@@ -692,14 +692,14 @@ export default function App() {
     }
   };
 
-  const handleStopAutoclicker = async () => {
+  const handleStopAutoclicker = useCallback(async () => {
     try {
       await api.stopAutoclicker();
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
-  };
+  }, []);
 
   // Filter persistence via localStorage
   useEffect(() => {
@@ -820,6 +820,28 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [selectedIds.size, selectedTask, activeTab, filteredTasks]);
 
+  const handleSelectProject = useCallback((id) => {
+    setSelectedProjectId(id);
+    setActiveTab('board');
+  }, []);
+
+  const handleClearSetupResult = useCallback((id) => {
+    setSetupResultMap((prev) => { const next = { ...prev }; delete next[id]; return next; });
+  }, []);
+
+  const handleClearTestResult = useCallback((id) => {
+    setTestStatusMap((prev) => { const next = { ...prev }; delete next[id]; return next; });
+  }, []);
+
+  const handleCloseModal = useCallback(() => setSelectedTask(null), []);
+
+  const handleClearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const selectedTaskProject = useMemo(
+    () => selectedTask ? projects.find((p) => p.id === selectedTask.projectId) : null,
+    [selectedTask, projects]
+  );
+
   const hasPreview = selectedProject?.url;
 
   return (
@@ -828,17 +850,17 @@ export default function App() {
         <Sidebar
           projects={projects}
           selectedProjectId={selectedProjectId}
-          onSelectProject={(id) => { setSelectedProjectId(id); setActiveTab('board'); }}
+          onSelectProject={handleSelectProject}
           onAddProject={handleAddProject}
           onRemoveProject={handleRemoveProject}
           onUpdateProjectUrl={handleUpdateProjectUrl}
           setupMap={setupMap}
           setupResultMap={setupResultMap}
-          onClearSetupResult={(id) => setSetupResultMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
+          onClearSetupResult={handleClearSetupResult}
           onCreateFixTask={handleCreateFixTask}
           testStatusMap={testStatusMap}
           railwayStatusMap={railwayStatusMap}
-          onClearTestResult={(id) => setTestStatusMap((prev) => { const next = { ...prev }; delete next[id]; return next; })}
+          onClearTestResult={handleClearTestResult}
           autoclickerStatus={autoclickerStatus}
           onStartAutoclicker={handleStartAutoclicker}
           onStopAutoclicker={handleStopAutoclicker}
@@ -912,7 +934,7 @@ export default function App() {
                 onDismissAll={handleBulkDismiss}
                 onPlanAll={handleBulkPlan}
                 onChangeEffort={handleBulkEffort}
-                onClearSelection={() => setSelectedIds(new Set())}
+                onClearSelection={handleClearSelection}
                 models={models}
               />
             )}
@@ -936,8 +958,8 @@ export default function App() {
       <ErrorBoundary name="Card Details">
         <CardModal
           task={selectedTask}
-          project={selectedTask ? projects.find((p) => p.id === selectedTask.projectId) : null}
-          onClose={() => setSelectedTask(null)}
+          project={selectedTaskProject}
+          onClose={handleCloseModal}
           onExecute={handleExecute}
           onPlan={handlePlan}
           onDismiss={handleDismiss}

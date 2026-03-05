@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { EFFORT_COLORS, getModelLabel, getModelProvider, formatCost, formatTokens } from '../utils.js';
 
-export default function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models }) {
+function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models }) {
   if (!task) return null;
 
   const isProposed = task.status === 'proposed';
@@ -372,3 +372,5 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
     </div>
   );
 }
+
+export default memo(CardModal);

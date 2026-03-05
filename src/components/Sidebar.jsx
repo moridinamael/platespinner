@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -94,7 +94,7 @@ function SortableProjectItem({ project, isActive, isConfirming, statusColor, tes
   );
 }
 
-export default function Sidebar({
+function Sidebar({
   projects,
   selectedProjectId,
   onSelectProject,
@@ -917,3 +917,5 @@ export default function Sidebar({
     </aside>
   );
 }
+
+export default memo(Sidebar);

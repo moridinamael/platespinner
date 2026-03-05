@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react';
 import Column from './Column.jsx';
 
 const COLUMNS = [
@@ -7,8 +8,11 @@ const COLUMNS = [
   { key: 'done', title: 'Done', statuses: ['done'] },
 ];
 
-export default function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive }) {
-  const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]));
+function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive }) {
+  const projectMap = useMemo(
+    () => Object.fromEntries(projects.map((p) => [p.id, p])),
+    [projects]
+  );
 
   return (
     <div className="kanban-board">
@@ -37,3 +41,5 @@ export default function KanbanBoard({ tasks, projects, execStartTimes, planStart
     </div>
   );
 }
+
+export default memo(KanbanBoard);

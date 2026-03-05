@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { formatBytes } from '../utils.js';
 
@@ -9,7 +9,7 @@ function formatElapsed(ms) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-export default function GenerateBar({
+function GenerateBar({
   generatingMap,
   onGenerate,
   statusMessage,
@@ -256,3 +256,5 @@ Do NOT make any code changes. Only propose tasks as structured JSON above.`;
     </div>
   );
 }
+
+export default memo(GenerateBar);
