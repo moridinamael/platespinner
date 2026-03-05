@@ -85,3 +85,30 @@ export function formatTokens(count) {
   if (count < 1000) return String(count);
   return `${(count / 1000).toFixed(1)}k`;
 }
+
+/**
+ * Returns true if a task matches all active filters (AND logic).
+ */
+export function matchesFilters(task, filters) {
+  if (filters.search) {
+    const s = filters.search.toLowerCase();
+    const haystack = `${task.title || ''} ${task.description || ''} ${task.rationale || ''}`.toLowerCase();
+    if (!haystack.includes(s)) return false;
+  }
+  if (filters.efforts.length > 0 && !filters.efforts.includes(task.effort)) return false;
+  if (filters.statuses.length > 0 && !filters.statuses.includes(task.status)) return false;
+  if (filters.modelId) {
+    const m = filters.modelId;
+    if (task.generatedBy !== m && task.plannedBy !== m && task.executedBy !== m) return false;
+  }
+  if (filters.hasPlan && !task.plan) return false;
+  if (filters.dateFrom) {
+    const from = new Date(filters.dateFrom).getTime();
+    if ((task.createdAt || 0) < from) return false;
+  }
+  if (filters.dateTo) {
+    const to = new Date(filters.dateTo).getTime() + 86400000;
+    if ((task.createdAt || 0) >= to) return false;
+  }
+  return true;
+}

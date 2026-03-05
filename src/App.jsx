@@ -10,6 +10,7 @@ import CardModal from './components/CardModal.jsx';
 import PlatesSpinning from './components/PlatesSpinning.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+import { matchesFilters } from './utils.js';
 
 export default function App() {
   const [theme, setTheme] = useState(() => {
@@ -791,33 +792,6 @@ export default function App() {
     }
   }, [handlePlan, handleExecute]);
 
-  const handlePlanAll = useCallback(async () => {
-    const proposedIds = filteredTasks
-      .filter(t => t.status === 'proposed')
-      .map(t => t.id);
-    if (proposedIds.length === 0) return;
-    try {
-      await api.batchAction('plan', proposedIds);
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, [filteredTasks]);
-
-  const handleExecuteAll = useCallback(async () => {
-    const plannedIds = filteredTasks
-      .filter(t => t.status === 'planned')
-      .sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity))
-      .map(t => t.id);
-    if (plannedIds.length === 0) return;
-    try {
-      await api.batchAction('execute', plannedIds);
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, [filteredTasks]);
-
   const handleStopAll = useCallback(async () => {
     try {
       const result = await api.stopAll();
@@ -863,29 +837,37 @@ export default function App() {
     [tasks, selectedProjectId]
   );
 
-  const filteredTasks = useMemo(() => projectTasks.filter((t) => {
-    if (filters.search) {
-      const s = filters.search.toLowerCase();
-      const haystack = `${t.title || ''} ${t.description || ''} ${t.rationale || ''}`.toLowerCase();
-      if (!haystack.includes(s)) return false;
+  const filteredTasks = useMemo(
+    () => projectTasks.filter((t) => matchesFilters(t, filters)),
+    [projectTasks, filters]
+  );
+
+  const handlePlanAll = useCallback(async () => {
+    const proposedIds = filteredTasks
+      .filter(t => t.status === 'proposed')
+      .map(t => t.id);
+    if (proposedIds.length === 0) return;
+    try {
+      await api.batchAction('plan', proposedIds);
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
     }
-    if (filters.efforts.length > 0 && !filters.efforts.includes(t.effort)) return false;
-    if (filters.statuses.length > 0 && !filters.statuses.includes(t.status)) return false;
-    if (filters.modelId) {
-      const m = filters.modelId;
-      if (t.generatedBy !== m && t.plannedBy !== m && t.executedBy !== m) return false;
+  }, [filteredTasks]);
+
+  const handleExecuteAll = useCallback(async () => {
+    const plannedIds = filteredTasks
+      .filter(t => t.status === 'planned')
+      .sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity))
+      .map(t => t.id);
+    if (plannedIds.length === 0) return;
+    try {
+      await api.batchAction('execute', plannedIds);
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
     }
-    if (filters.hasPlan && !t.plan) return false;
-    if (filters.dateFrom) {
-      const from = new Date(filters.dateFrom).getTime();
-      if ((t.createdAt || 0) < from) return false;
-    }
-    if (filters.dateTo) {
-      const to = new Date(filters.dateTo).getTime() + 86400000;
-      if ((t.createdAt || 0) >= to) return false;
-    }
-    return true;
-  }), [projectTasks, filters]);
+  }, [filteredTasks]);
 
   const filterActive = !!(filters.search || filters.efforts.length || filters.statuses.length || filters.modelId || filters.hasPlan || filters.dateFrom || filters.dateTo);
 
