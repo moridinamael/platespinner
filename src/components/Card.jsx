@@ -1,4 +1,6 @@
 import { memo } from 'react';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { useTaskProgress } from '../hooks/useTaskProgress.js';
 import { useSharedClock } from '../hooks/useSharedClock.js';
@@ -11,6 +13,23 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
   const isQueued = task.status === 'queued';
   const isExecuting = task.status === 'executing';
   const isDone = task.status === 'done';
+
+  const isDraggable = isProposed || isPlanned;
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition: sortTransition,
+    isDragging,
+  } = useSortable({ id: task.id, disabled: !isDraggable });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: sortTransition,
+    opacity: isDragging ? 0.4 : 1,
+    cursor: isDraggable ? 'grab' : 'pointer',
+  };
 
   const progress = useTaskProgress(task.id);
   const now = useSharedClock(isExecuting || isPlanning);
@@ -28,8 +47,13 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
 
   return (
     <div
-      className={`card card-${task.status}${isSelected ? ' card-selected' : ''}${isFocused ? ' card-focused' : ''}`}
+      ref={setNodeRef}
+      style={style}
+      className={`card card-${task.status}${isSelected ? ' card-selected' : ''}${isFocused ? ' card-focused' : ''}${isDragging ? ' card-dragging' : ''}`}
+      {...attributes}
+      {...listeners}
       onClick={(e) => {
+        if (isDragging) return;
         if (e.shiftKey || e.metaKey || e.ctrlKey) {
           e.preventDefault();
           onToggleSelect?.(task.id);
@@ -37,7 +61,6 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
           onSelect(task);
         }
       }}
-      style={{ cursor: 'pointer' }}
     >
       {/* Selection indicator */}
       <div className="card-select-indicator">

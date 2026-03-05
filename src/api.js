@@ -25,6 +25,7 @@ export const api = {
   reorderProjects: (orderedIds) => request('PATCH', '/projects/reorder', { orderedIds }),
   getTasks: (projectId) => request('GET', projectId ? `/tasks?projectId=${projectId}` : '/tasks'),
   updateTask: (id, updates) => request('PATCH', `/tasks/${id}`, updates),
+  reorderTasks: (orderedIds) => request('PATCH', '/tasks/reorder', { orderedIds }),
   getTemplates: () => request('GET', '/templates'),
   createTemplate: (data) => request('POST', '/templates', data),
   deleteTemplate: (id) => request('DELETE', `/templates/${id}`),

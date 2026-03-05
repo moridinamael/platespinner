@@ -26,6 +26,16 @@ router.get('/tasks/queue', (req, res) => {
   }
 });
 
+router.patch('/tasks/reorder', (req, res) => {
+  const { orderedIds } = req.body;
+  if (!Array.isArray(orderedIds)) {
+    return res.status(400).json({ error: 'orderedIds[] is required' });
+  }
+  state.reorderTasks(orderedIds);
+  broadcast('tasks:reordered', { orderedIds });
+  res.json({ message: 'Tasks reordered', count: orderedIds.length });
+});
+
 router.patch('/tasks/:id', (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
@@ -334,7 +344,7 @@ router.post('/tasks/batch', async (req, res) => {
     const validTasks = taskIds
       .map(id => state.getTask(id))
       .filter(t => t && (t.status === 'planned' || t.status === 'proposed'))
-      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      .sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
     if (validTasks.length === 0) {
       return res.json({ message: 'No tasks to execute', count: 0 });
     }

@@ -137,6 +137,19 @@ function load() {
       }
     }
 
+    // Backfill sortOrder for existing tasks missing it
+    let needsTaskSortBackfill = false;
+    for (const t of tasks.values()) {
+      if (t.sortOrder == null) { needsTaskSortBackfill = true; break; }
+    }
+    if (needsTaskSortBackfill) {
+      let idx = 0;
+      for (const t of tasks.values()) {
+        if (t.sortOrder == null) t.sortOrder = t.createdAt || idx;
+        idx++;
+      }
+    }
+
     console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from disk`);
 
     // Recover tasks stuck in transient states from a previous server crash
@@ -233,6 +246,7 @@ export function addTask({ projectId, title, description, rationale, effort, gene
     tokenUsage: null,
     costUsd: 0,
     createdAt: Date.now(),
+    sortOrder: Date.now(),
   };
   tasks.set(id, task);
   save();
@@ -274,6 +288,14 @@ export function updateTask(id, updates) {
   Object.assign(task, updates);
   save();
   return task;
+}
+
+export function reorderTasks(orderedIds) {
+  for (let i = 0; i < orderedIds.length; i++) {
+    const task = tasks.get(orderedIds[i]);
+    if (task) task.sortOrder = i;
+  }
+  save();
 }
 
 export function removeTask(id) {
@@ -412,7 +434,13 @@ export function enqueueTask(projectId, taskId) {
     executionQueues.set(projectId, queue);
   }
   if (!queue.includes(taskId)) {
-    queue.push(taskId);
+    const taskOrder = tasks.get(taskId)?.sortOrder ?? Infinity;
+    let insertIdx = queue.length;
+    for (let i = 0; i < queue.length; i++) {
+      const existingOrder = tasks.get(queue[i])?.sortOrder ?? Infinity;
+      if (taskOrder < existingOrder) { insertIdx = i; break; }
+    }
+    queue.splice(insertIdx, 0, taskId);
   }
   _reindexQueuePositions(projectId);
   save();

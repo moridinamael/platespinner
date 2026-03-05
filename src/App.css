@@ -1252,6 +1252,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 60px;
 }
 
 .column-empty {
@@ -3025,6 +3026,21 @@ html, body {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   box-shadow: 0 0 0 4px rgba(108, 138, 255, 0.15);
+}
+
+/* ===== Card Drag & Drop ===== */
+.card-dragging {
+  opacity: 0.4;
+  box-shadow: none;
+}
+
+.card-drag-overlay {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--accent);
+  transform: rotate(2deg);
+  cursor: grabbing;
+  max-width: 320px;
+  pointer-events: none;
 }
 
 /* ===== Command Palette ===== */

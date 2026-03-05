@@ -214,6 +214,18 @@ export default function App() {
         });
         break;
       }
+      case 'tasks:reordered': {
+        const { orderedIds } = data;
+        setTasks(prev => {
+          const updated = [...prev];
+          for (let i = 0; i < orderedIds.length; i++) {
+            const idx = updated.findIndex(t => t.id === orderedIds[i]);
+            if (idx !== -1) updated[idx] = { ...updated[idx], sortOrder: i };
+          }
+          return updated;
+        });
+        break;
+      }
       case 'task:created':
         setTasks((prev) => [...prev, data]);
         break;
@@ -753,6 +765,32 @@ export default function App() {
     }
   };
 
+  const handleReorderTasks = useCallback(async (orderedIds) => {
+    setTasks(prev => {
+      const taskMap = new Map(prev.map(t => [t.id, t]));
+      orderedIds.forEach((id, i) => {
+        const t = taskMap.get(id);
+        if (t) taskMap.set(id, { ...t, sortOrder: i });
+      });
+      return [...taskMap.values()];
+    });
+    try {
+      await api.reorderTasks(orderedIds);
+    } catch (err) {
+      api.getTasks().then(setTasks).catch(console.error);
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  }, []);
+
+  const handleMoveTask = useCallback(async (taskId, sourceCol, targetCol) => {
+    if (sourceCol === 'proposed' && targetCol === 'plan') {
+      handlePlan(taskId);
+    } else if ((sourceCol === 'proposed' || sourceCol === 'plan') && targetCol === 'executing') {
+      handleExecute(taskId);
+    }
+  }, [handlePlan, handleExecute]);
+
   const handlePlanAll = useCallback(async () => {
     const proposedIds = filteredTasks
       .filter(t => t.status === 'proposed')
@@ -769,7 +807,7 @@ export default function App() {
   const handleExecuteAll = useCallback(async () => {
     const plannedIds = filteredTasks
       .filter(t => t.status === 'planned')
-      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+      .sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity))
       .map(t => t.id);
     if (plannedIds.length === 0) return;
     try {
@@ -1204,6 +1242,8 @@ export default function App() {
               onPlanAll={handlePlanAll}
               onExecuteAll={handleExecuteAll}
               focusedTaskId={focusedTaskId}
+              onReorderTasks={handleReorderTasks}
+              onMoveTask={handleMoveTask}
             />
             {selectedIds.size > 0 && (
               <BulkActionBar
