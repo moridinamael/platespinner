@@ -45,7 +45,10 @@ export default function App() {
   });
   const [selectedIds, setSelectedIds] = useState(new Set());
 
-  const selectedProject = projects.find((p) => p.id === selectedProjectId);
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === selectedProjectId),
+    [projects, selectedProjectId]
+  );
 
   const [models, setModels] = useState([]);
 
@@ -719,9 +722,12 @@ export default function App() {
   }, [filters, selectedProjectId]);
 
   // Comprehensive filtering
-  const projectTasks = selectedProjectId
-    ? tasks.filter((t) => t.projectId === selectedProjectId)
-    : tasks;
+  const projectTasks = useMemo(
+    () => selectedProjectId
+      ? tasks.filter((t) => t.projectId === selectedProjectId)
+      : tasks,
+    [tasks, selectedProjectId]
+  );
 
   const filteredTasks = useMemo(() => projectTasks.filter((t) => {
     if (filters.search) {

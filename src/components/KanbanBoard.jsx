@@ -14,13 +14,29 @@ function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecut
     [projects]
   );
 
+  const tasksByColumn = useMemo(() => {
+    const map = {};
+    for (const col of COLUMNS) {
+      map[col.key] = [];
+    }
+    for (const t of tasks) {
+      for (const col of COLUMNS) {
+        if (col.statuses.includes(t.status)) {
+          map[col.key].push(t);
+          break;
+        }
+      }
+    }
+    return map;
+  }, [tasks]);
+
   return (
     <div className="kanban-board">
       {COLUMNS.map((col) => (
         <Column
           key={col.key}
           title={col.title}
-          tasks={tasks.filter((t) => col.statuses.includes(t.status))}
+          tasks={tasksByColumn[col.key]}
           projectMap={projectMap}
           execStartTimes={execStartTimes}
           planStartTimes={planStartTimes}
