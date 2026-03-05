@@ -30,6 +30,20 @@ export function getAgentCounts() {
   return { total: agents.length, byType, byProvider, agents };
 }
 
+let censusTimer = null;
+let censusPending = false;
+
 function broadcastCensus() {
+  if (censusTimer) {
+    censusPending = true;
+    return;
+  }
   broadcast('agents:census', getAgentCounts());
+  censusTimer = setTimeout(() => {
+    censusTimer = null;
+    if (censusPending) {
+      censusPending = false;
+      broadcastCensus();
+    }
+  }, 1000);
 }

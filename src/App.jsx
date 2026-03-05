@@ -34,6 +34,9 @@ export default function App() {
   const [templates, setTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('builtin:pareto-simple');
   const wsRef = useRef(null);
+  // Batched progress updates for generation and setup-tests (flushed every ~200ms)
+  const pendingProgressRef = useRef({ generating: {}, setup: {} });
+  const flushTimerRef = useRef(null);
   const [agentCensus, setAgentCensus] = useState(null);
   const [autoclickerStatus, setAutoclickerStatus] = useState(null);
   const [notificationSettings, setNotificationSettings] = useState(null);
@@ -107,6 +110,44 @@ export default function App() {
     }).catch(console.error);
   }, []);
 
+  // Flush batched generation/setup progress to React state
+  const flushProgress = useCallback(() => {
+    flushTimerRef.current = null;
+    const pending = pendingProgressRef.current;
+    const genUpdates = pending.generating;
+    const setupUpdates = pending.setup;
+    pending.generating = {};
+    pending.setup = {};
+    const hasGen = Object.keys(genUpdates).length > 0;
+    const hasSetup = Object.keys(setupUpdates).length > 0;
+    if (!hasGen && !hasSetup) return;
+    startTransition(() => {
+      if (hasGen) {
+        setGeneratingMap(prev => {
+          const next = { ...prev };
+          for (const [pid, upd] of Object.entries(genUpdates)) {
+            if (next[pid]) next[pid] = { ...next[pid], bytesReceived: upd.bytesReceived };
+          }
+          return next;
+        });
+      }
+      if (hasSetup) {
+        setSetupMap(prev => {
+          const next = { ...prev };
+          for (const [pid, upd] of Object.entries(setupUpdates)) {
+            if (next[pid]) next[pid] = { ...next[pid], bytesReceived: upd.bytesReceived };
+          }
+          return next;
+        });
+      }
+    });
+  }, []);
+
+  const scheduleFlush = useCallback(() => {
+    if (flushTimerRef.current != null) return;
+    flushTimerRef.current = setTimeout(flushProgress, 200);
+  }, [flushProgress]);
+
   // WebSocket connection
   const handleWsMessage = useCallback((event, data) => {
     switch (event) {
@@ -163,14 +204,11 @@ export default function App() {
         }));
         break;
       case 'generation:progress':
-        startTransition(() => {
-          setGeneratingMap((prev) => ({
-            ...prev,
-            [data.projectId]: { ...prev[data.projectId], bytesReceived: data.bytesReceived },
-          }));
-        });
+        pendingProgressRef.current.generating[data.projectId] = { bytesReceived: data.bytesReceived };
+        scheduleFlush();
         break;
       case 'generation:completed': {
+        delete pendingProgressRef.current.generating[data.projectId];
         setGeneratingMap((prev) => {
           const next = { ...prev };
           delete next[data.projectId];
@@ -184,6 +222,7 @@ export default function App() {
         break;
       }
       case 'generation:failed':
+        delete pendingProgressRef.current.generating[data.projectId];
         setGeneratingMap((prev) => {
           const next = { ...prev };
           delete next[data.projectId];
@@ -376,14 +415,11 @@ export default function App() {
         });
         break;
       case 'setup-tests:progress':
-        startTransition(() => {
-          setSetupMap((prev) => ({
-            ...prev,
-            [data.projectId]: { ...prev[data.projectId], bytesReceived: data.bytesReceived },
-          }));
-        });
+        pendingProgressRef.current.setup[data.projectId] = { bytesReceived: data.bytesReceived };
+        scheduleFlush();
         break;
       case 'setup-tests:completed':
+        delete pendingProgressRef.current.setup[data.projectId];
         setSetupMap((prev) => {
           const next = { ...prev };
           delete next[data.projectId];
@@ -395,6 +431,7 @@ export default function App() {
         }));
         break;
       case 'setup-tests:failed':
+        delete pendingProgressRef.current.setup[data.projectId];
         setSetupMap((prev) => {
           const next = { ...prev };
           delete next[data.projectId];
@@ -449,12 +486,18 @@ export default function App() {
         api.getAutoclickerStatus().then(setAutoclickerStatus).catch(() => {});
         break;
     }
-  }, []);
+  }, [scheduleFlush]);
 
   useEffect(() => {
     const manager = new WebSocketManager(handleWsMessage);
     wsRef.current = manager;
-    return () => manager.disconnect();
+    return () => {
+      manager.disconnect();
+      if (flushTimerRef.current != null) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+    };
   }, [handleWsMessage]);
 
   const handleAddProject = async ({ name, path }) => {
