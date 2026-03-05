@@ -1,3 +1,30 @@
+// Extract structured output from Claude CLI --output-format json
+export function extractClaudeJsonOutput(stdout) {
+  try {
+    const parsed = JSON.parse(stdout);
+    return {
+      text: parsed.result || '',
+      costUsd: parsed.cost_usd || parsed.total_cost_usd || null,
+      numTurns: parsed.num_turns || null,
+      durationMs: parsed.duration_ms || null,
+      durationApiMs: parsed.duration_api_ms || null,
+      inputTokens: parsed.usage?.input_tokens || null,
+      outputTokens: parsed.usage?.output_tokens || null,
+      isError: parsed.is_error || false,
+      sessionId: parsed.session_id || null,
+    };
+  } catch {
+    return { text: stdout, costUsd: null, numTurns: null, durationMs: null,
+             durationApiMs: null, inputTokens: null, outputTokens: null,
+             isError: false, sessionId: null };
+  }
+}
+
+// Rough token estimation for non-Claude providers (~1 token per 4 chars)
+export function estimateTokensFromText(text) {
+  return Math.ceil((text || '').length / 4);
+}
+
 // Multi-fallback parser for agent stdout
 
 export function parseGenerationOutput(stdout) {

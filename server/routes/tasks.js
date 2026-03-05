@@ -106,6 +106,20 @@ router.post('/tasks/:id/execute', async (req, res) => {
 
   const { modelId } = req.body || {};
 
+  // Check budget before execution
+  const project = state.getProject(task.projectId);
+  if (project && project.budgetLimitUsd != null) {
+    const projectTasks = state.getTasks(task.projectId);
+    const totalSpent = projectTasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
+    if (totalSpent >= project.budgetLimitUsd) {
+      return res.status(400).json({
+        error: 'Budget limit exceeded',
+        totalSpent,
+        budgetLimit: project.budgetLimitUsd,
+      });
+    }
+  }
+
   if (state.isProjectLocked(task.projectId)) {
     // Project is busy — enqueue instead of rejecting
     state.updateTask(task.id, { status: 'queued', executedBy: modelId || null });

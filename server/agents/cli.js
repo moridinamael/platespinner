@@ -11,7 +11,7 @@ export function buildGenerationCommand(modelId, prompt) {
     case 'claude':
       return {
         cmd: 'claude',
-        args: ['-p', '--model', modelId, '--allowedTools', 'Read,Glob,Grep'],
+        args: ['-p', '--model', modelId, '--output-format', 'json', '--allowedTools', 'Read,Glob,Grep'],
         useStdin: true,
       };
     case 'codex':
@@ -23,7 +23,7 @@ export function buildGenerationCommand(modelId, prompt) {
     case 'gemini':
       return {
         cmd: 'gemini',
-        args: ['-p', '--model', modelId, prompt],
+        args: ['--model', modelId, '-p', prompt],
         useStdin: false,
       };
     default:
@@ -44,7 +44,7 @@ export function buildExecutionCommand(modelId, prompt) {
     case 'claude':
       return {
         cmd: 'claude',
-        args: ['-p', '--model', modelId, '--allowedTools', 'Read,Glob,Grep,Write,Edit,Bash'],
+        args: ['-p', '--model', modelId, '--output-format', 'json', '--allowedTools', 'Read,Glob,Grep,Write,Edit,Bash'],
         useStdin: true,
       };
     case 'codex':
@@ -56,7 +56,7 @@ export function buildExecutionCommand(modelId, prompt) {
     case 'gemini':
       return {
         cmd: 'gemini',
-        args: ['-p', '--model', modelId, prompt, '--yolo'],
+        args: ['--model', modelId, '--yolo', '-p', prompt],
         useStdin: false,
       };
     default:

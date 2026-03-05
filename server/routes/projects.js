@@ -79,6 +79,10 @@ router.patch('/projects/:id', (req, res) => {
   }
   if ('railwayProject' in req.body) updates.railwayProject = req.body.railwayProject || null;
   if ('autoTestOnCommit' in req.body) updates.autoTestOnCommit = !!req.body.autoTestOnCommit;
+  if ('budgetLimitUsd' in req.body) {
+    const val = req.body.budgetLimitUsd;
+    updates.budgetLimitUsd = (val === null || val === '') ? null : Number(val);
+  }
   const updated = state.updateProject(req.params.id, updates);
   broadcast('project:updated', updated);
   res.json(updated);
@@ -297,6 +301,26 @@ router.post('/projects/:id/check-railway', async (req, res) => {
     broadcast('project:railway-status', { projectId: project.id, ...failResult });
     return res.status(500).json({ error: err.message });
   }
+});
+
+router.get('/projects/:id/costs', (req, res) => {
+  const project = state.getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const summary = state.getProjectCostSummary(req.params.id);
+  summary.budgetLimitUsd = project.budgetLimitUsd;
+  res.json(summary);
+});
+
+router.get('/costs/summary', (req, res) => {
+  const allProjects = state.getProjects();
+  const summaries = allProjects.map(p => ({
+    projectId: p.id,
+    projectName: p.name,
+    budgetLimitUsd: p.budgetLimitUsd,
+    ...state.getProjectCostSummary(p.id),
+  }));
+  const grandTotal = summaries.reduce((sum, s) => sum + s.totalCost, 0);
+  res.json({ grandTotal, projects: summaries });
 });
 
 export { checkRailwayHealth };

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
-import { EFFORT_COLORS, getModelLabel, getModelProvider } from '../utils.js';
+import { EFFORT_COLORS, getModelLabel, getModelProvider, formatCost, formatTokens } from '../utils.js';
 
 export default function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, models }) {
   if (!task) return null;
@@ -134,6 +134,9 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
           {isDone && task.commitHash && (
             <span className="commit-hash">{task.commitHash.slice(0, 7)}</span>
           )}
+          {task.costUsd > 0 && (
+            <span className="cost-badge">{formatCost(task.costUsd)}</span>
+          )}
         </div>
 
         <div className="modal-section">
@@ -188,6 +191,43 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
           <div className="modal-section">
             <h3>Agent Log</h3>
             <pre className="modal-log">{task.agentLog}</pre>
+          </div>
+        )}
+
+        {task.costUsd > 0 && (
+          <div className="modal-section modal-cost-section">
+            <h3>Cost</h3>
+            <div className="cost-summary">
+              <span className="cost-total">{formatCost(task.costUsd)}</span>
+              {task.tokenUsage && (
+                <div className="cost-breakdown">
+                  {task.tokenUsage.generation && (
+                    <div className="cost-phase">
+                      <span className="cost-phase-label">Generation</span>
+                      <span className="cost-phase-tokens">
+                        {formatTokens(task.tokenUsage.generation.input)} in / {formatTokens(task.tokenUsage.generation.output)} out
+                      </span>
+                    </div>
+                  )}
+                  {task.tokenUsage.planning && (
+                    <div className="cost-phase">
+                      <span className="cost-phase-label">Planning</span>
+                      <span className="cost-phase-tokens">
+                        {formatTokens(task.tokenUsage.planning.input)} in / {formatTokens(task.tokenUsage.planning.output)} out
+                      </span>
+                    </div>
+                  )}
+                  {task.tokenUsage.execution && (
+                    <div className="cost-phase">
+                      <span className="cost-phase-label">Execution</span>
+                      <span className="cost-phase-tokens">
+                        {formatTokens(task.tokenUsage.execution.input)} in / {formatTokens(task.tokenUsage.execution.output)} out
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

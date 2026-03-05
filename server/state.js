@@ -157,7 +157,7 @@ load();
 
 export function addProject({ name, path, url, testCommand }) {
   const id = randomUUID();
-  const project = { id, name: name || path.split('/').filter(Boolean).pop(), path, url: url || null, testCommand: testCommand || null, autoTestOnCommit: false, lastTestResult: null, lastRailwayResult: null };
+  const project = { id, name: name || path.split('/').filter(Boolean).pop(), path, url: url || null, testCommand: testCommand || null, autoTestOnCommit: false, lastTestResult: null, lastRailwayResult: null, budgetLimitUsd: null };
   projects.set(id, project);
   save();
   return project;
@@ -204,6 +204,8 @@ export function addTask({ projectId, title, description, rationale, effort, gene
     executedBy: null,
     commitHash: null,
     agentLog: null,
+    tokenUsage: null,
+    costUsd: 0,
     createdAt: Date.now(),
   };
   tasks.set(id, task);
@@ -218,6 +220,26 @@ export function getTask(id) {
 export function getTasks(projectId) {
   const all = [...tasks.values()];
   return projectId ? all.filter(t => t.projectId === projectId) : all;
+}
+
+export function getProjectCostSummary(projectId) {
+  const projectTasks = getTasks(projectId);
+  let totalCost = 0;
+  const costByEffort = { small: 0, medium: 0, large: 0 };
+  const costTimeline = [];
+
+  for (const t of projectTasks) {
+    const cost = t.costUsd || 0;
+    totalCost += cost;
+    if (t.effort in costByEffort) costByEffort[t.effort] += cost;
+    if (cost > 0) {
+      costTimeline.push({ timestamp: t.createdAt, cost });
+    }
+  }
+
+  costTimeline.sort((a, b) => a.timestamp - b.timestamp);
+
+  return { totalCost, costByEffort, costTimeline, taskCount: projectTasks.length };
 }
 
 export function updateTask(id, updates) {

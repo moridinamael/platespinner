@@ -46,6 +46,8 @@ export const api = {
   getNotificationSettings: (projectId) => request('GET', projectId ? `/notifications/settings?projectId=${projectId}` : '/notifications/settings'),
   updateNotificationSettings: (projectId, data) => request('PATCH', '/notifications/settings', { projectId, ...data }),
   testNotification: (projectId) => request('POST', '/notifications/test', { projectId }),
+  getProjectCosts: (id) => request('GET', `/projects/${id}/costs`),
+  getCostsSummary: () => request('GET', '/costs/summary'),
   getAgentStatus: () => request('GET', '/agents/status'),
   startAutoclicker: (config) => request('POST', '/autoclicker/start', config),
   stopAutoclicker: () => request('POST', '/autoclicker/stop'),

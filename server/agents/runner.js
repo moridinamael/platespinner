@@ -3,9 +3,9 @@ import { homedir } from 'os';
 import { broadcast } from '../ws.js';
 import { buildGenerationCommand, buildExecutionCommand, buildTestSetupCommand } from './cli.js';
 import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, buildTestSetupPrompt, buildJudgmentPrompt, getBuiltInTemplates } from './prompts.js';
-import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput, parseJudgmentOutput } from './parser.js';
+import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput, parseJudgmentOutput, extractClaudeJsonOutput, estimateTokensFromText } from './parser.js';
 import { toWSLPath } from '../paths.js';
-import { DEFAULT_MODEL_ID } from '../models.js';
+import { DEFAULT_MODEL_ID, getModel, estimateCost } from '../models.js';
 import { runTests, validateTestCommand } from '../testing.js';
 import * as state from '../state.js';
 import { registerAgent, unregisterAgent } from '../census.js';
@@ -167,6 +167,43 @@ function resolveTemplateContent(templateId) {
   return undefined;
 }
 
+function extractCostData(stdout, stdinData, modelId) {
+  const model = getModel(modelId);
+  if (model?.provider === 'claude') {
+    const extracted = extractClaudeJsonOutput(stdout);
+    return {
+      agentText: extracted.text,
+      costUsd: extracted.costUsd,
+      inputTokens: extracted.inputTokens,
+      outputTokens: extracted.outputTokens,
+      durationMs: extracted.durationMs,
+      numTurns: extracted.numTurns,
+    };
+  }
+  // Non-Claude: estimate from character counts
+  const inputTokens = estimateTokensFromText(stdinData || '');
+  const outputTokens = estimateTokensFromText(stdout);
+  const costUsd = estimateCost(modelId, inputTokens, outputTokens);
+  return {
+    agentText: stdout,
+    costUsd,
+    inputTokens,
+    outputTokens,
+    durationMs: null,
+    numTurns: null,
+  };
+}
+
+function checkBudget(project) {
+  if (project.budgetLimitUsd == null) return { allowed: true };
+  const projectTasks = state.getTasks(project.id);
+  const totalSpent = projectTasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
+  if (totalSpent >= project.budgetLimitUsd) {
+    return { allowed: false, totalSpent, limit: project.budgetLimitUsd };
+  }
+  return { allowed: true, totalSpent, limit: project.budgetLimitUsd, remaining: project.budgetLimitUsd - totalSpent };
+}
+
 export async function runGeneration(project, templateId, modelId, promptContent) {
   modelId = modelId || DEFAULT_MODEL_ID;
   const skillContent = promptContent || resolveTemplateContent(templateId);
@@ -183,12 +220,15 @@ export async function runGeneration(project, templateId, modelId, promptContent)
       (bytes) => { broadcast('generation:progress', { projectId: project.id, bytesReceived: bytes }); }
     );
     const stdout = await promise;
-    const proposals = parseGenerationOutput(stdout);
+    const costData = extractCostData(stdout, prompt, modelId);
+    const proposals = parseGenerationOutput(costData.agentText);
 
     // Dedup: skip proposals whose title matches an existing task for this project
     const existingTitles = new Set(
       state.getTasks(project.id).map((t) => t.title.toLowerCase().trim())
     );
+
+    const costPerTask = costData.costUsd ? costData.costUsd / Math.max(proposals.length, 1) : null;
 
     const createdTasks = [];
     let skipped = 0;
@@ -205,6 +245,12 @@ export async function runGeneration(project, templateId, modelId, promptContent)
         effort: proposal.estimatedEffort || 'medium',
         generatedBy: modelId,
       });
+      if (costPerTask != null) {
+        state.updateTask(task.id, {
+          tokenUsage: { generation: { input: costData.inputTokens, output: costData.outputTokens } },
+          costUsd: costPerTask,
+        });
+      }
       createdTasks.push(task);
       broadcast('task:created', task);
     }
@@ -213,6 +259,7 @@ export async function runGeneration(project, templateId, modelId, promptContent)
       projectId: project.id,
       taskCount: createdTasks.length,
       skippedDuplicates: skipped,
+      costUsd: costData.costUsd,
     });
 
     return createdTasks;
@@ -248,10 +295,22 @@ export async function runPlanning(task, modelId) {
 
   try {
     const stdout = await promise;
-    const plan = parsePlanningOutput(stdout);
+    const costData = extractCostData(stdout, prompt, modelId);
+    const plan = parsePlanningOutput(costData.agentText);
 
-    const updated = state.updateTask(task.id, { status: 'planned', plan, plannedBy: modelId });
-    broadcast('planning:completed', { taskId: task.id, plan, plannedBy: modelId });
+    const planningCost = costData.costUsd || 0;
+    const existingCost = task.costUsd || 0;
+    const updated = state.updateTask(task.id, {
+      status: 'planned',
+      plan,
+      plannedBy: modelId,
+      tokenUsage: {
+        ...(task.tokenUsage || {}),
+        planning: { input: costData.inputTokens, output: costData.outputTokens },
+      },
+      costUsd: existingCost + planningCost,
+    });
+    broadcast('planning:completed', { taskId: task.id, plan, plannedBy: modelId, costUsd: planningCost });
 
     return updated;
   } catch (err) {
@@ -283,6 +342,12 @@ export async function runExecution(task, modelId) {
     throw new Error('Project is already being executed on');
   }
 
+  const budget = checkBudget(project);
+  if (!budget.allowed) {
+    state.unlockProject(project.id);
+    throw new Error(`Budget limit exceeded: $${budget.totalSpent.toFixed(2)} spent of $${budget.limit.toFixed(2)} limit`);
+  }
+
   const prompt = buildExecutionPrompt(task);
   const { cmd, args, useStdin } = buildExecutionCommand(modelId, prompt);
 
@@ -302,16 +367,24 @@ export async function runExecution(task, modelId) {
 
   try {
     const stdout = await promise;
-    const result = parseExecutionOutput(stdout);
+    const costData = extractCostData(stdout, prompt, modelId);
+    const result = parseExecutionOutput(costData.agentText);
 
+    const executionCost = costData.costUsd || 0;
+    const existingCost = task.costUsd || 0;
     const updates = {
       status: 'done',
       commitHash: result.commitHash || null,
-      agentLog: result.summary || stdout.slice(0, 2000),
+      agentLog: result.summary || costData.agentText.slice(0, 2000),
+      tokenUsage: {
+        ...(task.tokenUsage || {}),
+        execution: { input: costData.inputTokens, output: costData.outputTokens },
+      },
+      costUsd: existingCost + executionCost,
     };
 
     const updated = state.updateTask(task.id, updates);
-    broadcast('execution:completed', { taskId: task.id, ...updates, result });
+    broadcast('execution:completed', { taskId: task.id, ...updates, result, costUsd: executionCost });
 
     emitNotification('task:completed', {
       projectId: project.id,
@@ -397,16 +470,24 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
 
   try {
     const stdout = await promise;
-    const result = parseExecutionOutput(stdout);
+    const costData = extractCostData(stdout, prompt, modelId);
+    const result = parseExecutionOutput(costData.agentText);
 
+    const executionCost = costData.costUsd || 0;
+    const existingCost = task.costUsd || 0;
     const updates = {
       status: 'done',
       commitHash: result.commitHash || null,
-      agentLog: result.summary || stdout.slice(0, 2000),
+      agentLog: result.summary || costData.agentText.slice(0, 2000),
+      tokenUsage: {
+        ...(task.tokenUsage || {}),
+        execution: { input: costData.inputTokens, output: costData.outputTokens },
+      },
+      costUsd: existingCost + executionCost,
     };
 
     const updated = state.updateTask(task.id, updates);
-    broadcast('execution:completed', { taskId: task.id, ...updates, result });
+    broadcast('execution:completed', { taskId: task.id, ...updates, result, costUsd: executionCost });
     return updated;
   } catch (err) {
     const revertStatus = task.plan ? 'planned' : 'proposed';
@@ -441,7 +522,8 @@ export async function runTestSetup(project, testInfo) {
       (bytes) => { broadcast('setup-tests:progress', { projectId: project.id, bytesReceived: bytes }); }
     );
     const stdout = await promise;
-    const result = parseTestSetupOutput(stdout);
+    const costData = extractCostData(stdout, prompt, DEFAULT_MODEL_ID);
+    const result = parseTestSetupOutput(costData.agentText);
 
     // If the agent reported a test command, validate and save it on the project
     if (result.testCommand) {

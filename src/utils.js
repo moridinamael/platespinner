@@ -64,3 +64,16 @@ export function getModelProviderForTask(task, models) {
   if (task.agentType) return task.agentType;
   return 'claude';
 }
+
+export function formatCost(costUsd) {
+  if (costUsd == null || costUsd === 0) return '$0.00';
+  if (costUsd < 0.01) return `$${costUsd.toFixed(4)}`;
+  if (costUsd < 1) return `$${costUsd.toFixed(3)}`;
+  return `$${costUsd.toFixed(2)}`;
+}
+
+export function formatTokens(count) {
+  if (!count) return '0';
+  if (count < 1000) return String(count);
+  return `${(count / 1000).toFixed(1)}k`;
+}

@@ -192,7 +192,8 @@ export default function App() {
         setTasks((prev) =>
           prev.map((t) =>
             t.id === data.taskId
-              ? { ...t, status: 'planned', plan: data.plan, plannedBy: data.plannedBy, progress: 0 }
+              ? { ...t, status: 'planned', plan: data.plan, plannedBy: data.plannedBy, progress: 0,
+                  costUsd: data.costUsd != null ? (t.costUsd || 0) + data.costUsd : t.costUsd }
               : t
           )
         );
@@ -284,7 +285,9 @@ export default function App() {
         setTasks((prev) =>
           prev.map((t) =>
             t.id === data.taskId
-              ? { ...t, status: 'done', commitHash: data.commitHash, agentLog: data.agentLog }
+              ? { ...t, status: 'done', commitHash: data.commitHash, agentLog: data.agentLog,
+                  costUsd: data.costUsd != null ? (t.costUsd || 0) + data.costUsd : t.costUsd,
+                  tokenUsage: data.tokenUsage || t.tokenUsage }
               : t
           )
         );
@@ -626,6 +629,7 @@ export default function App() {
           onUpdateNotificationSettings={handleUpdateNotificationSettings}
           onTestNotification={handleTestNotification}
           onRequestNotificationPermission={handleRequestNotificationPermission}
+          tasks={tasks}
         />
       </ErrorBoundary>
       <main className="main">

@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../api.js';
+import { EFFORT_COLORS, formatCost } from '../utils.js';
+import Sparkline from './Sparkline.jsx';
 
 export default function Sidebar({
   projects,
@@ -22,6 +24,7 @@ export default function Sidebar({
   onUpdateNotificationSettings,
   onTestNotification,
   onRequestNotificationPermission,
+  tasks,
 }) {
   const [path, setPath] = useState('');
   const [pushing, setPushing] = useState(null);
@@ -34,6 +37,7 @@ export default function Sidebar({
   const [creatingFix, setCreatingFix] = useState(false);
   const [fixCreated, setFixCreated] = useState(false);
   const [railwayInput, setRailwayInput] = useState('');
+  const [budgetInput, setBudgetInput] = useState('');
   const [confirmingProjectId, setConfirmingProjectId] = useState(null);
   const confirmTimerRef = useRef(null);
   const [showNotifSettings, setShowNotifSettings] = useState(false);
@@ -72,6 +76,7 @@ export default function Sidebar({
     setUrlInput(selectedProject?.url || '');
     setTestCmdInput(selectedProject?.testCommand || '');
     setRailwayInput(selectedProject?.railwayProject || '');
+    setBudgetInput(selectedProject?.budgetLimitUsd != null ? String(selectedProject.budgetLimitUsd) : '');
     api.getGitStatus(selectedProjectId).then(setGitInfo).catch(() => setGitInfo(null));
     api.getTestInfo(selectedProjectId).then(setTestInfo).catch(() => setTestInfo(null));
   }, [selectedProjectId, selectedProject?.url, selectedProject?.testCommand, selectedProject?.railwayProject]);
@@ -165,6 +170,32 @@ export default function Sidebar({
     try {
       await api.checkRailway(selectedProjectId);
     } catch { /* errors handled via WS broadcast */ }
+  };
+
+  // Cost dashboard data
+  const projectTasks = selectedProjectId && tasks ? tasks.filter(t => t.projectId === selectedProjectId) : [];
+  const totalProjectCost = projectTasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
+  const budgetLimit = selectedProject?.budgetLimitUsd;
+  const budgetPercent = budgetLimit ? Math.min((totalProjectCost / budgetLimit) * 100, 100) : null;
+  const costByEffort = { small: 0, medium: 0, large: 0 };
+  for (const t of projectTasks) {
+    if (t.effort in costByEffort) costByEffort[t.effort] += (t.costUsd || 0);
+  }
+  const costTimeline = projectTasks
+    .filter(t => t.costUsd > 0)
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map(t => ({ timestamp: t.createdAt, cost: t.costUsd }));
+
+  const handleBudgetSave = async () => {
+    if (!selectedProjectId) return;
+    const val = budgetInput.trim();
+    const numVal = val === '' ? null : parseFloat(val);
+    if (val !== '' && (isNaN(numVal) || numVal < 0)) return;
+    const current = selectedProject?.budgetLimitUsd;
+    if (numVal === current || (numVal === null && current === null)) return;
+    try {
+      await api.updateProject(selectedProjectId, { budgetLimitUsd: numVal });
+    } catch { /* ignore */ }
   };
 
   const canRunTests = testInfo && testInfo.source !== 'none';
@@ -683,6 +714,54 @@ export default function Sidebar({
               {railwayResult.healthy ? '\u2713' : '\u2717'} {railwayResult.message}
             </div>
           )}
+        </div>
+      )}
+
+      {selectedProjectId && (totalProjectCost > 0 || budgetLimit) && (
+        <div className="sidebar-costs">
+          <div className="costs-header">
+            <span className="costs-total-label">Total Spend</span>
+            <span className="costs-total-value">{formatCost(totalProjectCost)}</span>
+          </div>
+          {budgetLimit && (
+            <div className="budget-bar-container">
+              <div className="budget-bar">
+                <div
+                  className={`budget-bar-fill ${budgetPercent >= 90 ? 'budget-danger' : budgetPercent >= 70 ? 'budget-warn' : ''}`}
+                  style={{ width: `${budgetPercent}%` }}
+                />
+              </div>
+              <span className="budget-label">
+                {formatCost(totalProjectCost)} / {formatCost(budgetLimit)}
+              </span>
+            </div>
+          )}
+          <div className="costs-by-effort">
+            {['small', 'medium', 'large'].map(effort => (
+              costByEffort[effort] > 0 && (
+                <div key={effort} className="cost-effort-row">
+                  <span className="effort-dot" style={{ backgroundColor: EFFORT_COLORS[effort] }} />
+                  <span className="cost-effort-label">{effort}</span>
+                  <span className="cost-effort-value">{formatCost(costByEffort[effort])}</span>
+                </div>
+              )
+            ))}
+          </div>
+          {costTimeline.length >= 2 && (
+            <Sparkline data={costTimeline} />
+          )}
+          <label className="setting-field">
+            <span className="setting-label">Budget Limit ($)</span>
+            <input
+              type="text"
+              className="input input-sm"
+              placeholder="No limit"
+              value={budgetInput}
+              onChange={(e) => setBudgetInput(e.target.value)}
+              onBlur={handleBudgetSave}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+            />
+          </label>
         </div>
       )}
 
