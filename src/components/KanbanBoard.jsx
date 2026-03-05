@@ -8,7 +8,7 @@ const COLUMNS = [
   { key: 'done', title: 'Done', statuses: ['done'] },
 ];
 
-function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive, onPlanAll, onExecuteAll }) {
+function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive, onPlanAll, onExecuteAll, focusedTaskId }) {
   const projectMap = useMemo(
     () => Object.fromEntries(projects.map((p) => [p.id, p])),
     [projects]
@@ -55,6 +55,7 @@ function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecut
           filterActive={filterActive}
           onPlanAll={onPlanAll}
           onExecuteAll={onExecuteAll}
+          focusedTaskId={focusedTaskId}
         />
       ))}
     </div>

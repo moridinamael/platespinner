@@ -214,7 +214,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
           ) : (
             <h2 className="modal-title">{task.title}</h2>
           )}
-          <button className="modal-close" onClick={onClose}>&times;</button>
+          <button className="modal-close" onClick={onClose} title="Close (Esc)">&times;</button>
         </div>
 
         <div className="modal-meta">
@@ -494,7 +494,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
                   ))}
                 </select>
                 <button className="btn btn-plan" onClick={() => { onPlan(task.id, selectedModelId); onClose(); }}>
-                  Plan
+                  Plan <kbd className="shortcut-hint" style={{ opacity: 1 }}>P</kbd>
                 </button>
                 <button
                   className={`btn btn-dismiss${confirmingDismiss ? ' confirming' : ''}`}
@@ -530,7 +530,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
                   ))}
                 </select>
                 <button className="btn btn-execute" onClick={() => { onExecute(task.id, selectedModelId); onClose(); }}>
-                  Execute
+                  Execute <kbd className="shortcut-hint" style={{ opacity: 1 }}>E</kbd>
                 </button>
                 <button
                   className={`btn btn-dismiss${confirmingDismiss ? ' confirming' : ''}`}

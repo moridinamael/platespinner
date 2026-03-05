@@ -4,7 +4,7 @@ import { useTaskProgress } from '../hooks/useTaskProgress.js';
 import { useSharedClock } from '../hooks/useSharedClock.js';
 import { EFFORT_COLORS, formatBytes, getModelLabelForTask, getModelProviderForTask } from '../utils.js';
 
-function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR }) {
+function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, isFocused }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
@@ -28,7 +28,7 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
 
   return (
     <div
-      className={`card card-${task.status}${isSelected ? ' card-selected' : ''}`}
+      className={`card card-${task.status}${isSelected ? ' card-selected' : ''}${isFocused ? ' card-focused' : ''}`}
       onClick={(e) => {
         if (e.shiftKey || e.metaKey || e.ctrlKey) {
           e.preventDefault();
@@ -105,7 +105,7 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
 
         {isProposed && (
           <button className="btn btn-sm btn-plan" onClick={(e) => { e.stopPropagation(); onPlan(task.id); }}>
-            Plan
+            Plan<span className="shortcut-hint">P</span>
           </button>
         )}
 
@@ -120,7 +120,7 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
 
         {isPlanned && (
           <button className="btn btn-sm btn-execute" onClick={(e) => { e.stopPropagation(); onExecute(task.id); }}>
-            Execute
+            Execute<span className="shortcut-hint">E</span>
           </button>
         )}
 

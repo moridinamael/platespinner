@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import Card from './Card.jsx';
 
-function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive, columnKey, onPlanAll, onExecuteAll }) {
+function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive, columnKey, onPlanAll, onExecuteAll, focusedTaskId }) {
   const executingTasks = tasks.filter(t => t.status !== 'queued');
   const queuedTasks = tasks.filter(t => t.status === 'queued')
     .sort((a, b) => (a.queuePosition ?? Infinity) - (b.queuePosition ?? Infinity) || (a.createdAt || 0) - (b.createdAt || 0));
@@ -42,6 +42,7 @@ function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onEx
             models={models}
             isSelected={selectedIds?.has(task.id)}
             onToggleSelect={onToggleSelect}
+            isFocused={task.id === focusedTaskId}
           />
         ))}
         {hasQueuedSection && (
@@ -68,6 +69,7 @@ function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onEx
             models={models}
             isSelected={selectedIds?.has(task.id)}
             onToggleSelect={onToggleSelect}
+            isFocused={task.id === focusedTaskId}
           />
         ))}
         {tasks.length === 0 && (
