@@ -133,6 +133,10 @@ export function buildExecutionPrompt(task) {
     ? `\n\n## Implementation Plan\n\nA planning agent has already analyzed the codebase and produced the following implementation plan. Follow this plan closely:\n\n${task.plan}\n\n---\n`
     : '';
 
+  const branchSection = task.branch
+    ? `\n\n## Branch\n\nYou are working on branch: \`${task.branch}\`. Commit your changes to this branch.\n\n---\n`
+    : '';
+
   const priorAttempt = task.agentLog
     ? `\n\n## Prior Attempt\n\nA previous execution agent attempted this task but failed. There may be partial changes in the working directory. Review the current state before proceeding.\n\n**Agent log:** ${task.agentLog}\n\n---\n`
     : '';
@@ -146,7 +150,7 @@ export function buildExecutionPrompt(task) {
 **Title:** ${task.title}
 **Description:** ${task.description}
 **Rationale:** ${task.rationale}
-${planSection}${priorAttempt}
+${planSection}${branchSection}${priorAttempt}
 Implement this task in the current working directory. Follow the rubric process: analyze, create rubric, implement, verify, self-score, then git commit.
 
 IMPORTANT: Your output MUST contain the result wrapped in <execution-result> tags exactly as specified in the instructions above. Do not output anything after the closing </execution-result> tag.`;

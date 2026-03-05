@@ -298,6 +298,7 @@ export default function App() {
           prev.map((t) =>
             t.id === data.taskId
               ? { ...t, status: 'done', commitHash: data.commitHash, agentLog: data.agentLog,
+                  branch: data.branch || t.branch, baseBranch: data.baseBranch || t.baseBranch,
                   costUsd: data.costUsd != null ? (t.costUsd || 0) + data.costUsd : t.costUsd,
                   tokenUsage: data.tokenUsage || t.tokenUsage }
               : t
@@ -602,6 +603,32 @@ export default function App() {
     await Notification.requestPermission();
   };
 
+  const handleMerge = async (taskId, strategy) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    try {
+      const result = await api.mergeTask(task.projectId, taskId, strategy || 'merge');
+      setStatusMessage(result.message || 'Branch merged successfully');
+      setTimeout(() => setStatusMessage(null), 3000);
+    } catch (err) {
+      setStatusMessage(`Merge failed: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 5000);
+    }
+  };
+
+  const handleCreatePR = async (taskId) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    try {
+      const result = await api.createPR(task.projectId, taskId);
+      setStatusMessage(`PR created: ${result.prUrl}`);
+      setTimeout(() => setStatusMessage(null), 5000);
+    } catch (err) {
+      setStatusMessage(`PR creation failed: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 5000);
+    }
+  };
+
   const handleStopAutoclicker = async () => {
     try {
       await api.stopAutoclicker();
@@ -807,6 +834,8 @@ export default function App() {
               onAbort={handleAbort}
               onDequeue={handleDequeue}
               onSelectTask={setSelectedTask}
+              onMerge={handleMerge}
+              onCreatePR={handleCreatePR}
               models={models}
               selectedIds={selectedIds}
               onToggleSelect={handleToggleSelect}
@@ -851,6 +880,8 @@ export default function App() {
           onAbort={handleAbort}
           onDequeue={handleDequeue}
           onUpdateTask={handleUpdateTask}
+          onMerge={handleMerge}
+          onCreatePR={handleCreatePR}
           models={models}
         />
       </ErrorBoundary>

@@ -601,6 +601,22 @@ export default function Sidebar({
             />
             <span className="setting-label">Auto-test after commit</span>
           </label>
+          <label className="setting-field">
+            <span className="setting-label">Branch Strategy</span>
+            <select
+              className="select input-sm"
+              value={selectedProject?.branchStrategy || 'direct'}
+              onChange={async (e) => {
+                try {
+                  await api.updateProject(selectedProjectId, { branchStrategy: e.target.value });
+                } catch { /* ignore */ }
+              }}
+            >
+              <option value="direct">Direct (commit to current branch)</option>
+              <option value="per-task">Per-task (feature branch per task)</option>
+              <option value="per-batch">Per-batch (branch per generation)</option>
+            </select>
+          </label>
         </div>
       )}
 

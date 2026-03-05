@@ -157,7 +157,7 @@ load();
 
 export function addProject({ name, path, url, testCommand }) {
   const id = randomUUID();
-  const project = { id, name: name || path.split('/').filter(Boolean).pop(), path, url: url || null, testCommand: testCommand || null, autoTestOnCommit: false, lastTestResult: null, lastRailwayResult: null, budgetLimitUsd: null };
+  const project = { id, name: name || path.split('/').filter(Boolean).pop(), path, url: url || null, testCommand: testCommand || null, autoTestOnCommit: false, lastTestResult: null, lastRailwayResult: null, budgetLimitUsd: null, branchStrategy: 'direct' };
   projects.set(id, project);
   save();
   return project;
@@ -203,6 +203,9 @@ export function addTask({ projectId, title, description, rationale, effort, gene
     plan: null,
     executedBy: null,
     commitHash: null,
+    branch: null,
+    baseBranch: null,
+    prUrl: null,
     agentLog: null,
     tokenUsage: null,
     costUsd: 0,

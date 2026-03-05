@@ -13,6 +13,34 @@ import { emitNotification, checkAllTasksDone } from '../notifications.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
 
+// --- Git branch helpers ---
+
+function slugify(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
+}
+
+function gitExec(args, cwd) {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, { cwd }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(stderr.trim() || err.message));
+      resolve(stdout.trim());
+    });
+  });
+}
+
+async function getCurrentBranch(cwd) {
+  return gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+}
+
+async function branchExists(cwd, branchName) {
+  try {
+    await gitExec(['rev-parse', '--verify', branchName], cwd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function advanceQueue(projectId) {
   let nextTaskId;
   while ((nextTaskId = state.dequeueTask(projectId))) {
@@ -348,6 +376,27 @@ export async function runExecution(task, modelId) {
     throw new Error(`Budget limit exceeded: $${budget.totalSpent.toFixed(2)} spent of $${budget.limit.toFixed(2)} limit`);
   }
 
+  // --- Per-task branch creation ---
+  const cwd = toWSLPath(project.path);
+  let branchName = null;
+  let baseBranch = null;
+
+  if (project.branchStrategy === 'per-task') {
+    baseBranch = await getCurrentBranch(cwd);
+    const slug = slugify(task.title);
+    branchName = `kanban/task-${task.id.slice(0, 8)}-${slug}`;
+
+    // Handle branch already existing (retry scenario)
+    if (await branchExists(cwd, branchName)) {
+      await gitExec(['checkout', branchName], cwd);
+    } else {
+      await gitExec(['checkout', '-b', branchName], cwd);
+    }
+
+    state.updateTask(task.id, { branch: branchName, baseBranch });
+    broadcast('task:updated', state.getTask(task.id));
+  }
+
   const prompt = buildExecutionPrompt(task);
   const { cmd, args, useStdin } = buildExecutionCommand(modelId, prompt);
 
@@ -355,7 +404,7 @@ export async function runExecution(task, modelId) {
   broadcast('execution:started', { taskId: task.id });
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
 
-  const stopPolling = pollGitStatus(toWSLPath(project.path), task.id);
+  const stopPolling = pollGitStatus(cwd, task.id);
 
   const { proc, promise } = spawnAgent(
     cmd, args, project.path,
@@ -382,6 +431,10 @@ export async function runExecution(task, modelId) {
       },
       costUsd: existingCost + executionCost,
     };
+    if (branchName) {
+      updates.branch = branchName;
+      updates.baseBranch = baseBranch;
+    }
 
     const updated = state.updateTask(task.id, updates);
     broadcast('execution:completed', { taskId: task.id, ...updates, result, costUsd: executionCost });
@@ -437,6 +490,14 @@ export async function runExecution(task, modelId) {
     });
     if (!aborted) throw err;
   } finally {
+    // Checkout back to base branch if we created a per-task branch
+    if (baseBranch) {
+      try {
+        await gitExec(['checkout', baseBranch], cwd);
+      } catch (e) {
+        console.error('Failed to checkout base branch:', e.message);
+      }
+    }
     state.removeProcess(task.id);
     state.clearAborted(task.id);
     stopPolling();

@@ -7,7 +7,7 @@ const COLUMNS = [
   { key: 'done', title: 'Done', statuses: ['done'] },
 ];
 
-export default function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, models, selectedIds, onToggleSelect, filterActive }) {
+export default function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive }) {
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]));
 
   return (
@@ -26,6 +26,8 @@ export default function KanbanBoard({ tasks, projects, execStartTimes, planStart
           onAbort={onAbort}
           onDequeue={onDequeue}
           onSelectTask={onSelectTask}
+          onMerge={onMerge}
+          onCreatePR={onCreatePR}
           models={models}
           selectedIds={selectedIds}
           onToggleSelect={onToggleSelect}

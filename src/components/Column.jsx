@@ -1,6 +1,6 @@
 import Card from './Card.jsx';
 
-export default function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, models, selectedIds, onToggleSelect, filterActive }) {
+export default function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive }) {
   const executingTasks = tasks.filter(t => t.status !== 'queued');
   const queuedTasks = tasks.filter(t => t.status === 'queued')
     .sort((a, b) => (a.queuePosition ?? Infinity) - (b.queuePosition ?? Infinity) || (a.createdAt || 0) - (b.createdAt || 0));
@@ -26,6 +26,8 @@ export default function Column({ title, tasks, projectMap, execStartTimes, planS
             onAbort={onAbort}
             onDequeue={onDequeue}
             onSelect={onSelectTask}
+            onMerge={onMerge}
+            onCreatePR={onCreatePR}
             models={models}
             isSelected={selectedIds?.has(task.id)}
             onToggleSelect={onToggleSelect}
@@ -49,6 +51,8 @@ export default function Column({ title, tasks, projectMap, execStartTimes, planS
             onAbort={onAbort}
             onDequeue={onDequeue}
             onSelect={onSelectTask}
+            onMerge={onMerge}
+            onCreatePR={onCreatePR}
             queuePosition={index + 1}
             models={models}
             isSelected={selectedIds?.has(task.id)}

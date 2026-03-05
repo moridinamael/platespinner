@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { EFFORT_COLORS, getModelLabel, getModelProvider, formatCost, formatTokens } from '../utils.js';
 
-export default function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, models }) {
+export default function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models }) {
   if (!task) return null;
 
   const isProposed = task.status === 'proposed';
@@ -17,6 +17,7 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
   const defaultModelId = task.generatedBy || (models?.[0]?.id) || 'claude-opus-4-6';
   const [selectedModelId, setSelectedModelId] = useState(defaultModelId);
   const [confirmingDismiss, armDismiss, resetDismiss] = useConfirm();
+  const [mergeStrategy, setMergeStrategy] = useState('merge');
 
   // Edit mode state
   const [editing, setEditing] = useState(false);
@@ -133,6 +134,12 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
           <span className="modal-status">{task.status}</span>
           {isDone && task.commitHash && (
             <span className="commit-hash">{task.commitHash.slice(0, 7)}</span>
+          )}
+          {isDone && task.branch && (
+            <span className="branch-badge">{task.branch}</span>
+          )}
+          {isDone && task.prUrl && (
+            <a href={task.prUrl} target="_blank" rel="noopener noreferrer" className="pr-link">PR</a>
           )}
           {task.costUsd > 0 && (
             <span className="cost-badge">{formatCost(task.costUsd)}</span>
@@ -339,6 +346,25 @@ export default function CardModal({ task, project, onClose, onExecute, onPlan, o
           <div className="modal-actions">
             <button className="btn btn-abort" onClick={() => { onAbort(task.id); onClose(); }}>
               Abort Execution
+            </button>
+          </div>
+        )}
+
+        {isDone && task.branch && (
+          <div className="modal-actions">
+            <select
+              className="select model-select"
+              value={mergeStrategy}
+              onChange={(e) => setMergeStrategy(e.target.value)}
+            >
+              <option value="merge">Merge (--no-ff)</option>
+              <option value="squash">Squash & Merge</option>
+            </select>
+            <button className="btn btn-merge" onClick={() => { onMerge?.(task.id, mergeStrategy); onClose(); }}>
+              Merge to Main
+            </button>
+            <button className="btn btn-pr" onClick={() => { onCreatePR?.(task.id); }}>
+              Create PR
             </button>
           </div>
         )}

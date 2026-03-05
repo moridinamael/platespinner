@@ -79,6 +79,13 @@ router.patch('/projects/:id', (req, res) => {
   }
   if ('railwayProject' in req.body) updates.railwayProject = req.body.railwayProject || null;
   if ('autoTestOnCommit' in req.body) updates.autoTestOnCommit = !!req.body.autoTestOnCommit;
+  if ('branchStrategy' in req.body) {
+    const strategy = req.body.branchStrategy;
+    if (!['direct', 'per-task', 'per-batch'].includes(strategy)) {
+      return res.status(400).json({ error: 'branchStrategy must be direct, per-task, or per-batch' });
+    }
+    updates.branchStrategy = strategy;
+  }
   if ('budgetLimitUsd' in req.body) {
     const val = req.body.budgetLimitUsd;
     updates.budgetLimitUsd = (val === null || val === '') ? null : Number(val);
@@ -321,6 +328,84 @@ router.get('/costs/summary', (req, res) => {
   }));
   const grandTotal = summaries.reduce((sum, s) => sum + s.totalCost, 0);
   res.json({ grandTotal, projects: summaries });
+});
+
+// Merge a task's feature branch back to its base branch
+router.post('/projects/:projectId/tasks/:taskId/merge', async (req, res) => {
+  const project = state.getProject(req.params.projectId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const task = state.getTask(req.params.taskId);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  if (!task.branch) return res.status(400).json({ error: 'Task has no feature branch' });
+
+  const cwd = toWSLPath(project.path);
+  const strategy = req.body.strategy || 'merge';
+  const targetBranch = task.baseBranch || 'main';
+
+  try {
+    // Checkout the target branch
+    await execPromise('git', ['checkout', targetBranch], { cwd });
+
+    if (strategy === 'squash') {
+      await execPromise('git', ['merge', '--squash', task.branch], { cwd });
+      await execPromise('git', ['commit', '-m', `squash: ${task.title} (${task.branch})`], { cwd });
+    } else {
+      await execPromise('git', ['merge', '--no-ff', task.branch, '-m', `merge: ${task.title} (${task.branch})`], { cwd });
+    }
+
+    // Delete the feature branch after successful merge
+    try {
+      await execPromise('git', ['branch', '-d', task.branch], { cwd });
+    } catch { /* branch deletion is best-effort */ }
+
+    state.updateTask(task.id, { merged: true, branch: null });
+    broadcast('task:updated', state.getTask(task.id));
+
+    res.json({ message: `Branch ${task.branch} merged via ${strategy}` });
+  } catch (err) {
+    // Abort merge if there was a conflict
+    try {
+      await execPromise('git', ['merge', '--abort'], { cwd });
+    } catch { /* ignore if no merge to abort */ }
+    // Try to return to the target branch
+    try {
+      await execPromise('git', ['checkout', targetBranch], { cwd });
+    } catch { /* ignore */ }
+    res.status(500).json({ error: `Merge failed: ${err.message}` });
+  }
+});
+
+// Create a PR from a task's feature branch
+router.post('/projects/:projectId/tasks/:taskId/create-pr', async (req, res) => {
+  const project = state.getProject(req.params.projectId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const task = state.getTask(req.params.taskId);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  if (!task.branch) return res.status(400).json({ error: 'Task has no feature branch' });
+
+  const cwd = toWSLPath(project.path);
+
+  try {
+    // Push branch to remote
+    await execPromise('git', ['push', '-u', 'origin', task.branch], { cwd, timeout: 60000 });
+
+    // Create PR using gh CLI
+    const prBody = `## ${task.title}\n\n${task.description || ''}\n\n${task.rationale ? `**Rationale:** ${task.rationale}` : ''}`;
+    const prOutput = await execPromise('gh', [
+      'pr', 'create',
+      '--head', task.branch,
+      '--title', task.title,
+      '--body', prBody,
+    ], { cwd, timeout: 30000 });
+
+    const prUrl = prOutput.trim();
+    state.updateTask(task.id, { prUrl });
+    broadcast('task:updated', state.getTask(task.id));
+
+    res.json({ prUrl });
+  } catch (err) {
+    res.status(500).json({ error: `PR creation failed: ${err.message}` });
+  }
 });
 
 export { checkRailwayHealth };

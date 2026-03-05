@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { EFFORT_COLORS, formatBytes, getModelLabelForTask, getModelProviderForTask } from '../utils.js';
 
-export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect }) {
+export default function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
@@ -161,7 +161,28 @@ export default function Card({ task, project, execStartTime, planStartTime, onEx
             {task.commitHash.slice(0, 7)}
           </span>
         )}
+        {isDone && task.branch && (
+          <span className="branch-badge" title={task.branch}>
+            {task.branch.length > 30 ? task.branch.slice(0, 27) + '...' : task.branch}
+          </span>
+        )}
       </div>
+
+      {isDone && task.branch && (
+        <div className="card-done-actions" onClick={(e) => e.stopPropagation()}>
+          <button className="btn btn-sm btn-merge" onClick={(e) => { e.stopPropagation(); onMerge?.(task.id); }}>
+            Merge
+          </button>
+          <button className="btn btn-sm btn-pr" onClick={(e) => { e.stopPropagation(); onCreatePR?.(task.id); }}>
+            Create PR
+          </button>
+          {task.prUrl && (
+            <a href={task.prUrl} target="_blank" rel="noopener noreferrer" className="pr-link" onClick={(e) => e.stopPropagation()}>
+              PR
+            </a>
+          )}
+        </div>
+      )}
 
       {isExecuting && (task.gitSummary || task.gitUntracked?.length > 0) && (
         <div className="card-git" onClick={(e) => e.stopPropagation()}>
