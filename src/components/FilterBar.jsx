@@ -90,7 +90,7 @@ export default function FilterBar({ filters, onFiltersChange, models }) {
           <button
             key={e}
             className={`filter-toggle${filters.efforts.includes(e) ? ' active' : ''}`}
-            style={filters.efforts.includes(e) ? { background: EFFORT_COLORS[e], borderColor: EFFORT_COLORS[e], color: '#0f1117' } : undefined}
+            style={filters.efforts.includes(e) ? { background: EFFORT_COLORS[e], borderColor: EFFORT_COLORS[e], color: 'var(--contrast-text)' } : undefined}
             onClick={() => toggleEffort(e)}
           >
             {e.charAt(0).toUpperCase() + e.slice(1)}

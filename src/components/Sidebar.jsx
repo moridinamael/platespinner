@@ -117,6 +117,8 @@ function Sidebar({
   onRequestNotificationPermission,
   onReorderProjects,
   tasks,
+  theme,
+  onToggleTheme,
 }) {
   const [path, setPath] = useState('');
   const [pushing, setPushing] = useState(null);
@@ -360,7 +362,16 @@ function Sidebar({
 
   return (
     <aside className="sidebar">
-      <h1 className="sidebar-title">Kanban Agents</h1>
+      <div className="sidebar-header">
+        <h1 className="sidebar-title">Kanban Agents</h1>
+        <button
+          className="theme-toggle"
+          onClick={onToggleTheme}
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+        >
+          {theme === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19'}
+        </button>
+      </div>
 
       <button
         className="btn btn-sm btn-notif-toggle"

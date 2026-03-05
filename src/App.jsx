@@ -12,6 +12,37 @@ import CommandPalette from './components/CommandPalette.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 export default function App() {
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('kanban-theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+    if (window.matchMedia?.('(prefers-color-scheme: light)').matches) return 'light';
+    return 'dark';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('kanban-theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e) => {
+      if (!localStorage.getItem('kanban-theme')) {
+        setTheme(e.matches ? 'dark' : 'light');
+      }
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('kanban-theme', next);
+      return next;
+    });
+  }, []);
+
   const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
@@ -1107,6 +1138,8 @@ export default function App() {
           onRequestNotificationPermission={handleRequestNotificationPermission}
           onReorderProjects={handleReorderProjects}
           tasks={tasks}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
       </ErrorBoundary>
       <main className="main">
