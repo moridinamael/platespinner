@@ -132,6 +132,8 @@ export default function Sidebar({
   const [budgetInput, setBudgetInput] = useState('');
   const [confirmingProjectId, setConfirmingProjectId] = useState(null);
   const confirmTimerRef = useRef(null);
+  const fetchDebounceRef = useRef(null);
+  const fetchAbortRef = useRef(null);
   const [showNotifSettings, setShowNotifSettings] = useState(false);
   const [webhookUrlLocal, setWebhookUrlLocal] = useState('');
 
@@ -169,15 +171,38 @@ export default function Sidebar({
     setTestCmdInput(selectedProject?.testCommand || '');
     setRailwayInput(selectedProject?.railwayProject || '');
     setBudgetInput(selectedProject?.budgetLimitUsd != null ? String(selectedProject.budgetLimitUsd) : '');
-    api.getGitStatus(selectedProjectId).then(setGitInfo).catch(() => setGitInfo(null));
-    api.getTestInfo(selectedProjectId).then(setTestInfo).catch(() => setTestInfo(null));
+
+    // Cancel previous debounce timer and in-flight requests
+    clearTimeout(fetchDebounceRef.current);
+    if (fetchAbortRef.current) fetchAbortRef.current.abort();
+
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
+
+    fetchDebounceRef.current = setTimeout(() => {
+      const opts = { signal: controller.signal };
+      api.getGitStatus(selectedProjectId, opts)
+        .then(setGitInfo)
+        .catch(() => { if (!controller.signal.aborted) setGitInfo(null); });
+      api.getTestInfo(selectedProjectId, opts)
+        .then(setTestInfo)
+        .catch(() => { if (!controller.signal.aborted) setTestInfo(null); });
+    }, 300);
+
+    return () => {
+      clearTimeout(fetchDebounceRef.current);
+      controller.abort();
+    };
   }, [selectedProjectId, selectedProject?.url, selectedProject?.testCommand, selectedProject?.railwayProject]);
 
   // When setup completes, refresh test info and git status
   useEffect(() => {
     if (!setupResult || !selectedProjectId) return;
-    api.getTestInfo(selectedProjectId).then(setTestInfo).catch(() => {});
-    api.getGitStatus(selectedProjectId).then(setGitInfo).catch(() => {});
+    const controller = new AbortController();
+    const opts = { signal: controller.signal };
+    api.getTestInfo(selectedProjectId, opts).then(setTestInfo).catch(() => {});
+    api.getGitStatus(selectedProjectId, opts).then(setGitInfo).catch(() => {});
+    return () => controller.abort();
   }, [setupResult, selectedProjectId]);
 
   useEffect(() => {

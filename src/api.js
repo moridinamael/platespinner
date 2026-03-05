@@ -1,12 +1,13 @@
 // REST helpers
 const BASE = '/api';
 
-async function request(method, path, body) {
+async function request(method, path, body, { signal } = {}) {
   const opts = {
     method,
     headers: { 'Content-Type': 'application/json' },
   };
   if (body) opts.body = JSON.stringify(body);
+  if (signal) opts.signal = signal;
   const res = await fetch(`${BASE}${path}`, opts);
   if (res.status === 204) return null;
   if (!res.ok) {
@@ -37,8 +38,8 @@ export const api = {
   dequeueTask: (id) => request('POST', `/tasks/${id}/dequeue`),
   abortTask: (id) => request('POST', `/tasks/${id}/abort`),
   pushProject: (id) => request('POST', `/projects/${id}/push`),
-  getGitStatus: (id) => request('GET', `/projects/${id}/git-status`),
-  getTestInfo: (id) => request('GET', `/projects/${id}/test-info`),
+  getGitStatus: (id, opts) => request('GET', `/projects/${id}/git-status`, undefined, opts),
+  getTestInfo: (id, opts) => request('GET', `/projects/${id}/test-info`, undefined, opts),
   getLastTestResult: (id) => request('GET', `/projects/${id}/last-test-result`),
   runTests: (id) => request('POST', `/projects/${id}/test`),
   setupTests: (id) => request('POST', `/projects/${id}/setup-tests`),
