@@ -90,7 +90,7 @@ export function validateTestCommand(command) {
 /**
  * Extract a summary line from test output for common frameworks.
  */
-function extractSummary(output, passed) {
+export function extractSummary(output, passed) {
   const lines = output.split('\n').filter(Boolean);
 
   // Jest: "Tests: X passed, Y total" or "Test Suites: ..."
