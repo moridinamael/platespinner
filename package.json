@@ -1,7 +1,32 @@
 {
-  "name": "kanban-interface",
+  "name": "platespinner",
   "version": "1.0.0",
-  "private": true,
+  "description": "AI-powered kanban board that uses CLI tools (Claude Code, Codex, Gemini) to generate, plan, and execute development tasks",
+  "author": "Matt Freeman",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/moridinamael/platespinner.git"
+  },
+  "homepage": "https://github.com/moridinamael/platespinner#readme",
+  "bugs": {
+    "url": "https://github.com/moridinamael/platespinner/issues"
+  },
+  "keywords": [
+    "kanban",
+    "ai",
+    "claude-code",
+    "task-management",
+    "developer-tools",
+    "codex",
+    "gemini",
+    "drag-and-drop",
+    "websocket",
+    "react"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "type": "module",
   "scripts": {
     "dev": "concurrently \"node server/index.js\" \"vite\"",

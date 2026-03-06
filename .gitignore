@@ -3,3 +3,6 @@ dist/
 data/
 !data/.gitkeep
 plugins/local/
+.env
+.DS_Store
+*.log
