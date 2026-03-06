@@ -14,6 +14,7 @@ import { LOGS_DIR } from '../state.js';
 import { registerAgent, unregisterAgent } from '../census.js';
 import { emitNotification, checkAllTasksDone } from '../notifications.js';
 import { writeReplayEvent, compressReplayLog } from './replay.js';
+import { runPostExecutionHooks, runPreExecutionHooks, runPostPlanningHooks, runTaskValidators, emitPluginEvent } from '../plugins/manager.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
 
@@ -329,6 +330,7 @@ export async function runGeneration(project, templateId, modelId, promptContent)
       skippedDuplicates: skipped,
       costUsd: costData.costUsd,
     });
+    emitPluginEvent('generation:completed', { projectId: project.id, taskCount: createdTasks.length });
 
     return createdTasks;
   } catch (err) {
@@ -409,6 +411,14 @@ export async function runPlanning(task, modelId) {
     });
     broadcast('planning:completed', { taskId: task.id, plan, plannedBy: modelId, costUsd: planningCost });
 
+    // Run post-planning hooks
+    try {
+      await runPostPlanningHooks(task, plan, project);
+    } catch (hookErr) {
+      console.error('Post-planning hook error:', hookErr.message);
+    }
+    emitPluginEvent('planning:completed', { taskId: task.id, plan });
+
     return updated;
   } catch (err) {
     writeReplayEvent(task.id, 'planning', {
@@ -485,6 +495,13 @@ export async function runExecution(task, modelId) {
     preCommitHash = await gitExec(['rev-parse', 'HEAD'], cwd);
   } catch {
     preCommitHash = null;
+  }
+
+  // Run pre-execution hooks
+  try {
+    await runPreExecutionHooks(task, project);
+  } catch (hookErr) {
+    console.error('Pre-execution hook error:', hookErr.message);
   }
 
   const prompt = buildExecutionPrompt(task);
@@ -575,6 +592,33 @@ export async function runExecution(task, modelId) {
     const { diff: _diff, ...broadcastUpdates } = updates;
     broadcast('execution:completed', { taskId: task.id, ...broadcastUpdates, result, costUsd: executionCost });
 
+    // Run task validators
+    try {
+      const validation = await runTaskValidators(task, result, project);
+      if (!validation.valid) {
+        const revertStatus = task.plan ? 'planned' : 'proposed';
+        state.updateTask(task.id, {
+          status: revertStatus,
+          agentLog: `Task validator rejected: ${validation.message}`,
+        });
+        broadcast('execution:validation-failed', {
+          taskId: task.id,
+          validator: validation.validatorName,
+          message: validation.message,
+        });
+      }
+    } catch (valErr) {
+      console.error('Task validator error:', valErr.message);
+    }
+
+    // Run post-execution hooks
+    try {
+      await runPostExecutionHooks(task, result, project);
+    } catch (hookErr) {
+      console.error('Post-execution hook error:', hookErr.message);
+    }
+    emitPluginEvent('execution:completed', { taskId: task.id, commitHash: result.commitHash, costUsd: executionCost });
+
     emitNotification('task:completed', {
       projectId: project.id,
       taskId: task.id,
@@ -634,6 +678,7 @@ export async function runExecution(task, modelId) {
       : `Execution failed (agent exited unexpectedly). The previous agent may have left partial changes in the working directory. Error: ${err.message}`;
     state.updateTask(task.id, { status: revertStatus, agentLog });
     broadcast('execution:failed', { taskId: task.id, error: agentLog, aborted, status: revertStatus });
+    emitPluginEvent('execution:failed', { taskId: task.id, error: agentLog, aborted });
     emitNotification('task:failed', {
       projectId: project.id,
       taskId: task.id,
@@ -675,6 +720,13 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     preCommitHash = await gitExec(['rev-parse', 'HEAD'], wtCwd);
   } catch {
     preCommitHash = null;
+  }
+
+  // Run pre-execution hooks
+  try {
+    await runPreExecutionHooks(task, project);
+  } catch (hookErr) {
+    console.error('Pre-execution hook error:', hookErr.message);
   }
 
   const prompt = buildExecutionPrompt(task);
@@ -758,6 +810,34 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     const updated = state.updateTask(task.id, updates);
     const { diff: _diff, ...broadcastUpdates } = updates;
     broadcast('execution:completed', { taskId: task.id, ...broadcastUpdates, result, costUsd: executionCost });
+
+    // Run task validators
+    try {
+      const validation = await runTaskValidators(task, result, project);
+      if (!validation.valid) {
+        const revertStatus = task.plan ? 'planned' : 'proposed';
+        state.updateTask(task.id, {
+          status: revertStatus,
+          agentLog: `Task validator rejected: ${validation.message}`,
+        });
+        broadcast('execution:validation-failed', {
+          taskId: task.id,
+          validator: validation.validatorName,
+          message: validation.message,
+        });
+      }
+    } catch (valErr) {
+      console.error('Task validator error:', valErr.message);
+    }
+
+    // Run post-execution hooks
+    try {
+      await runPostExecutionHooks(task, result, project);
+    } catch (hookErr) {
+      console.error('Post-execution hook error:', hookErr.message);
+    }
+    emitPluginEvent('execution:completed', { taskId: task.id, commitHash: result.commitHash, costUsd: executionCost });
+
     return updated;
   } catch (err) {
     writeReplayEvent(task.id, 'execution', {
@@ -768,6 +848,7 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     const agentLog = `Execution failed in worktree: ${err.message}`;
     state.updateTask(task.id, { status: revertStatus, agentLog });
     broadcast('execution:failed', { taskId: task.id, error: agentLog, aborted: false, status: revertStatus });
+    emitPluginEvent('execution:failed', { taskId: task.id, error: agentLog, aborted: false });
     throw err;
   } finally {
     wtLogStream.end();

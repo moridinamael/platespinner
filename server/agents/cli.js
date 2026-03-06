@@ -2,16 +2,20 @@
 // Model is now explicit per-invocation via modelId
 
 import { getModel } from '../models.js';
+import { getCustomToolNames } from '../plugins/manager.js';
 
 export function buildGenerationCommand(modelId, prompt) {
   const model = getModel(modelId);
   if (!model) throw new Error(`Unknown model: ${modelId}`);
 
+  const generationCustomTools = getCustomToolNames('generation');
+  const generationTools = ['Read', 'Glob', 'Grep', ...generationCustomTools].join(',');
+
   switch (model.provider) {
     case 'claude':
       return {
         cmd: 'claude',
-        args: ['-p', '--model', modelId, '--output-format', 'json', '--allowedTools', 'Read,Glob,Grep'],
+        args: ['-p', '--model', modelId, '--output-format', 'json', '--allowedTools', generationTools],
         useStdin: true,
       };
     case 'codex':
@@ -40,11 +44,14 @@ export function buildExecutionCommand(modelId, prompt) {
   const model = getModel(modelId);
   if (!model) throw new Error(`Unknown model: ${modelId}`);
 
+  const executionCustomTools = getCustomToolNames('execution');
+  const executionTools = ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', ...executionCustomTools].join(',');
+
   switch (model.provider) {
     case 'claude':
       return {
         cmd: 'claude',
-        args: ['-p', '--model', modelId, '--output-format', 'json', '--allowedTools', 'Read,Glob,Grep,Write,Edit,Bash'],
+        args: ['-p', '--model', modelId, '--output-format', 'json', '--allowedTools', executionTools],
         useStdin: true,
       };
     case 'codex':

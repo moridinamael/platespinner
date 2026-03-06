@@ -1,3 +1,5 @@
+import { runCustomParsers } from '../plugins/manager.js';
+
 // Extract structured output from Claude CLI --output-format json
 export function extractClaudeJsonOutput(stdout) {
   try {
@@ -57,7 +59,11 @@ export function parseGenerationOutput(stdout) {
   }
   if (objects.length > 0) return objects;
 
-  // Strategy 4: No structured proposals found — return empty
+  // Strategy 4: Try custom parsers registered by plugins
+  const customResult = runCustomParsers('generation', stdout);
+  if (customResult) return customResult;
+
+  // Strategy 5: No structured proposals found — return empty
   // (The agent produced conversational output without task-proposals tags)
   return [];
 }
@@ -112,7 +118,11 @@ export function parsePlanningOutput(stdout) {
     } catch { /* fall through */ }
   }
 
-  // Strategy 3: Fallback — return raw stdout as plan text
+  // Strategy 3: Try custom parsers registered by plugins
+  const customResult = runCustomParsers('planning', stdout);
+  if (customResult) return customResult;
+
+  // Strategy 4: Fallback — return raw stdout as plan text
   return stdout.slice(0, 10000);
 }
 
@@ -186,7 +196,11 @@ export function parseExecutionOutput(stdout) {
     } catch { /* fall through */ }
   }
 
-  // Strategy 3: Check for commit hash in output
+  // Strategy 3: Try custom parsers registered by plugins
+  const customResult = runCustomParsers('execution', stdout);
+  if (customResult) return customResult;
+
+  // Strategy 4: Check for commit hash in output
   const commitMatch = stdout.match(/\b([0-9a-f]{7,40})\b/);
   const hasCommit = commitMatch && stdout.toLowerCase().includes('commit');
 

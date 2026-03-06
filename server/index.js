@@ -16,6 +16,8 @@ import notificationRoutes from './routes/notifications.js';
 import * as state from './state.js';
 import { broadcast } from './ws.js';
 import { startDigestScheduler, stopDigestScheduler } from './digest.js';
+import pluginRoutes from './routes/plugins.js';
+import { loadPlugins } from './plugins/loader.js';
 
 function isPrivateIP(ip) {
   // Handle IPv4-mapped IPv6 (::ffff:x.x.x.x)
@@ -65,6 +67,7 @@ app.use('/api', templateRoutes);
 app.use('/api', agentRoutes);
 app.use('/api', autoclickerRoutes);
 app.use('/api', notificationRoutes);
+app.use('/api', pluginRoutes);
 
 // Proxy for iframe preview — strips X-Frame-Options / CSP frame-ancestors
 app.get('/api/proxy', async (req, res) => {
@@ -160,6 +163,16 @@ setInterval(async () => {
 }, 90_000);
 
 const PORT = process.env.PORT || 3001;
+
+// Load plugins before starting server
+const pluginResult = await loadPlugins();
+if (pluginResult.loaded > 0) {
+  console.log(`Loaded ${pluginResult.loaded} plugin(s)`);
+}
+if (pluginResult.errors.length > 0) {
+  console.warn(`${pluginResult.errors.length} plugin(s) failed to load`);
+}
+
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`WebSocket available on ws://localhost:${PORT}`);
