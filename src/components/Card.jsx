@@ -6,6 +6,13 @@ import { useTaskProgress } from '../hooks/useTaskProgress.js';
 import { useSharedClock } from '../hooks/useSharedClock.js';
 import { formatBytes, getModelLabelForTask, getModelProviderForTask } from '../utils.js';
 
+const ActivitySpinner = ({ variant }) => (
+  <svg className={`activity-spinner activity-spinner-${variant}`} width="16" height="16" viewBox="0 0 16 16">
+    <circle className="activity-spinner-track" cx="8" cy="8" r="6" />
+    <circle className="activity-spinner-arc" cx="8" cy="8" r="6" />
+  </svg>
+);
+
 function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, isFocused }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
@@ -131,7 +138,7 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
 
         {isPlanning && (
           <span className="executing-status">
-            <span className="spinner" />
+            <ActivitySpinner variant="planning" />
             <span className="progress-info">
               {elapsedStr}{progress?.bytesReceived > 0 ? ` · ${formatBytes(progress.bytesReceived)}` : ''}
             </span>
@@ -159,7 +166,7 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
 
         {isExecuting && (
           <span className="executing-status">
-            <span className="spinner" />
+            <ActivitySpinner variant="executing" />
             <span className="progress-info">
               {elapsedStr}{progress?.bytesReceived > 0 ? ` · ${formatBytes(progress.bytesReceived)}` : ''}
             </span>

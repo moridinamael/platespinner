@@ -1570,6 +1570,8 @@ html, body {
   font-size: 13px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  transition: opacity 0.3s ease;
+  min-width: 4ch;
 }
 
 .executing-status {
@@ -1577,6 +1579,7 @@ html, body {
   align-items: center;
   gap: 6px;
   margin-left: auto;
+  animation: fade-in 0.3s ease;
 }
 
 .queue-badge {
@@ -1601,6 +1604,51 @@ html, body {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ===== Activity Spinner (SVG) ===== */
+.activity-spinner {
+  flex-shrink: 0;
+}
+
+.activity-spinner-track {
+  fill: none;
+  stroke: var(--text-dim);
+  stroke-width: 2;
+  opacity: 0.3;
+}
+
+.activity-spinner-arc {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 10 28;
+  stroke-dashoffset: 0;
+  transform-origin: center;
+  animation: spinner-rotate 1s linear infinite, spinner-pulse 2s ease-in-out infinite;
+}
+
+.activity-spinner-planning .activity-spinner-arc {
+  stroke: var(--accent);
+}
+
+.activity-spinner-executing .activity-spinner-arc {
+  stroke: var(--yellow);
+}
+
+@keyframes spinner-rotate {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spinner-pulse {
+  0%, 100% { stroke-dasharray: 10 28; }
+  50% { stroke-dasharray: 28 10; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-spinner-arc {
+    animation: spinner-rotate 2s linear infinite;
+  }
 }
 
 @keyframes fade-in {
