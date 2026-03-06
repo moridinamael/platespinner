@@ -4,7 +4,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { useTaskProgress } from '../hooks/useTaskProgress.js';
 import { useSharedClock } from '../hooks/useSharedClock.js';
-import { EFFORT_COLORS, formatBytes, getModelLabelForTask, getModelProviderForTask } from '../utils.js';
+import { formatBytes, getModelLabelForTask, getModelProviderForTask } from '../utils.js';
 
 function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, isFocused }) {
   const isProposed = task.status === 'proposed';
@@ -107,10 +107,7 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
       </div>
 
       <div className="card-footer">
-        <span
-          className="effort-badge"
-          style={{ backgroundColor: EFFORT_COLORS[task.effort] || EFFORT_COLORS.medium }}
-        >
+        <span className={`effort-badge effort-${task.effort || 'medium'}`}>
           {task.effort}
         </span>
 

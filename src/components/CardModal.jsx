@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, memo } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { api } from '../api.js';
-import { EFFORT_COLORS, getModelLabel, getModelProvider, formatCost, formatTokens, formatLogSize } from '../utils.js';
+import { getModelLabel, getModelProvider, formatCost, formatTokens, formatLogSize } from '../utils.js';
 import DiffViewer from './DiffViewer.jsx';
 import AnsiToHtml from 'ansi-to-html';
 
@@ -273,10 +273,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
               <option value="large">large</option>
             </select>
           ) : (
-            <span
-              className="effort-badge"
-              style={{ backgroundColor: EFFORT_COLORS[task.effort] || EFFORT_COLORS.medium }}
-            >
+            <span className={`effort-badge effort-${task.effort || 'medium'}`}>
               {task.effort}
             </span>
           )}
