@@ -28,6 +28,7 @@
   --contrast-text: #0f1117;
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.15);
   --shadow-md: 0 4px 8px rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.2);
+  --shadow-hover: 0 8px 24px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.15);
   --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
   --shadow-popup: 0 4px 12px rgba(0,0,0,0.4);
   --shadow-overlay: 0 8px 24px rgba(0,0,0,0.4);
@@ -60,6 +61,7 @@
   --contrast-text: #0f1117;
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.15);
   --shadow-md: 0 4px 8px rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.2);
+  --shadow-hover: 0 8px 24px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.15);
   --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
   --shadow-popup: 0 4px 12px rgba(0,0,0,0.4);
   --shadow-overlay: 0 8px 24px rgba(0,0,0,0.4);
@@ -87,6 +89,7 @@
   --contrast-text: #ffffff;
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.05);
   --shadow-md: 0 4px 8px rgba(0,0,0,0.1), 0 8px 24px rgba(0,0,0,0.06);
+  --shadow-hover: 0 8px 24px rgba(0,0,0,0.07), 0 2px 8px rgba(0,0,0,0.04);
   --shadow-lg: 0 8px 32px rgba(0,0,0,0.15);
   --shadow-popup: 0 4px 12px rgba(0,0,0,0.12);
   --shadow-overlay: 0 8px 24px rgba(0,0,0,0.12);
@@ -115,6 +118,7 @@
     --contrast-text: #ffffff;
     --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.05);
     --shadow-md: 0 4px 8px rgba(0,0,0,0.1), 0 8px 24px rgba(0,0,0,0.06);
+    --shadow-hover: 0 8px 24px rgba(0,0,0,0.07), 0 2px 8px rgba(0,0,0,0.04);
     --shadow-lg: 0 8px 32px rgba(0,0,0,0.15);
     --shadow-popup: 0 4px 12px rgba(0,0,0,0.12);
     --shadow-overlay: 0 8px 24px rgba(0,0,0,0.12);
@@ -1321,8 +1325,8 @@ html, body {
 
 .card:hover {
   border-color: var(--text-dim);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: var(--shadow-hover);
 }
 
 .card-planning {
@@ -3035,9 +3039,9 @@ html, body {
 }
 
 .card-drag-overlay {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45), 0 6px 16px rgba(0, 0, 0, 0.25);
   border: 1px solid var(--accent);
-  transform: rotate(2deg);
+  transform: rotate(2deg) scale(1.03);
   cursor: grabbing;
   max-width: 320px;
   pointer-events: none;
