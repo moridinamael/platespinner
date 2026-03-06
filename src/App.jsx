@@ -83,6 +83,7 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [focusedCardIndex, setFocusedCardIndex] = useState(-1);
+  const [replayResults, setReplayResults] = useState({});
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId),
@@ -555,6 +556,14 @@ export default function App() {
       case 'autoclicker:merge-conflict':
       case 'autoclicker:merge-complete':
         api.getAutoclickerStatus().then(setAutoclickerStatus).catch(() => {});
+        break;
+      case 'replay:completed':
+        setReplayResults(prev => ({ ...prev, [data.taskId]: data }));
+        break;
+      case 'replay:failed':
+        setReplayResults(prev => ({ ...prev, [data.taskId]: { error: data.error } }));
+        break;
+      case 'replay:progress':
         break;
     }
   }, [scheduleFlush]);
@@ -1272,6 +1281,7 @@ export default function App() {
           models={models}
           streamingLog={selectedTask ? (logBufferRef.current[selectedTask.id] || '') : ''}
           logStreamVersion={logStreamVersion}
+          replayResult={selectedTask ? replayResults[selectedTask.id] : null}
         />
       </ErrorBoundary>
       <PlatesSpinning

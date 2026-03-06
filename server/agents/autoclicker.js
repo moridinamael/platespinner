@@ -6,6 +6,7 @@ import { buildGenerationCommand } from './cli.js';
 import { buildJudgmentPrompt, getBuiltInTemplates } from './prompts.js';
 import { parseJudgmentOutput, extractClaudeJsonOutput } from './parser.js';
 import { runGeneration, runPlanning, runExecution, spawnAgent } from './runner.js';
+import { writeReplayEvent, compressReplayLog } from './replay.js';
 import * as state from '../state.js';
 
 let orchestratorRunning = false;
@@ -31,6 +32,11 @@ async function _runJudgmentAgent(project, tasks, templates, gitLog, testResult) 
   const prompt = buildJudgmentPrompt(project, tasks, templates, gitLog, testResult);
   const { cmd, args, useStdin } = buildGenerationCommand(DEFAULT_MODEL_ID, prompt);
 
+  writeReplayEvent(project.id, 'judgment', {
+    type: 'prompt_sent', phase: 'judgment', projectId: project.id, modelId: DEFAULT_MODEL_ID, prompt,
+    cmd, args: args.filter(a => a !== prompt),
+  });
+
   const { promise } = spawnAgent(
     cmd, args, project.path,
     useStdin ? prompt : null,
@@ -40,7 +46,20 @@ async function _runJudgmentAgent(project, tasks, templates, gitLog, testResult) 
   try {
     const stdout = await promise;
     const extracted = extractClaudeJsonOutput(stdout);
+
+    writeReplayEvent(project.id, 'judgment', {
+      type: 'response_received', phase: 'judgment', projectId: project.id, modelId: DEFAULT_MODEL_ID,
+      rawResponse: stdout.slice(0, 100000),
+      costUsd: extracted.costUsd, inputTokens: extracted.inputTokens,
+      outputTokens: extracted.outputTokens, durationMs: extracted.durationMs, numTurns: extracted.numTurns,
+    });
+
     const decision = parseJudgmentOutput(extracted.text);
+
+    writeReplayEvent(project.id, 'judgment', {
+      type: 'parsed_output', phase: 'judgment', projectId: project.id,
+      parsedResult: { action: decision.action, targetTaskId: decision.targetTaskId, reasoning: decision.reasoning },
+    });
     if (DEBUG && decision.action === 'skip') {
       console.debug('[autoclicker] Judgment parsed as skip — reasoning:', decision.reasoning);
       console.debug('[autoclicker] Raw stdout (first 500 chars):', stdout.slice(0, 500));
@@ -57,10 +76,16 @@ async function _runJudgmentAgent(project, tasks, templates, gitLog, testResult) 
     };
     return decision;
   } catch (err) {
+    writeReplayEvent(project.id, 'judgment', {
+      type: 'error', phase: 'judgment', projectId: project.id,
+      error: err.message, stack: err.stack?.slice(0, 2000),
+    });
     if (DEBUG) {
       console.debug('[autoclicker] Judgment agent threw:', err.message);
     }
     return { action: 'skip', reasoning: `Judgment agent failed: ${err.message}`, costData: null };
+  } finally {
+    compressReplayLog(project.id, 'judgment').catch(() => {});
   }
 }
 

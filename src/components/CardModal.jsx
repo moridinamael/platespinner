@@ -7,7 +7,17 @@ import AnsiToHtml from 'ansi-to-html';
 
 const ansiConverter = new AnsiToHtml({ fg: '#959ab0', bg: 'transparent', newline: true });
 
-function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models, streamingLog, logStreamVersion }) {
+function formatEventType(type) {
+  switch (type) {
+    case 'prompt_sent': return 'Prompt Sent';
+    case 'response_received': return 'Response Received';
+    case 'parsed_output': return 'Output Parsed';
+    case 'error': return 'Error';
+    default: return type;
+  }
+}
+
+function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models, streamingLog, logStreamVersion, replayResult }) {
   if (!task) return null;
 
   const isProposed = task.status === 'proposed';
@@ -39,6 +49,13 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const [logLoading, setLogLoading] = useState(false);
   const logContainerRef = useRef(null);
 
+  // Timeline/replay state
+  const [replayTimeline, setReplayTimeline] = useState(null);
+  const [replayLoading, setReplayLoading] = useState(false);
+  const [replayError, setReplayError] = useState(null);
+  const [expandedEventId, setExpandedEventId] = useState(null);
+  const [replayRunning, setReplayRunning] = useState(false);
+
   // Edit mode state
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
@@ -59,6 +76,10 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
     setLogMeta([]);
     setSelectedLogPhase(null);
     setLogSearch('');
+    setReplayTimeline(null);
+    setReplayError(null);
+    setExpandedEventId(null);
+    setReplayRunning(false);
   }, [task?.id]);
 
   // Fetch diff when Changes tab is selected
@@ -103,6 +124,29 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
       })
       .catch(() => { setLogContent(''); setLogLoading(false); });
   }, [selectedLogPhase, task?.id, activeTab, isActive]);
+
+  // Fetch replay timeline when Timeline tab is selected
+  useEffect(() => {
+    if (activeTab !== 'timeline' || !task) return;
+    if (replayTimeline) return;
+    setReplayLoading(true);
+    api.getTaskReplay(task.id)
+      .then(data => {
+        setReplayTimeline(data.events || []);
+        setReplayLoading(false);
+      })
+      .catch(err => {
+        setReplayError(err.message);
+        setReplayLoading(false);
+      });
+  }, [activeTab, task?.id, replayTimeline]);
+
+  // Handle incoming replay result from WebSocket
+  useEffect(() => {
+    if (replayResult) {
+      setReplayRunning(false);
+    }
+  }, [replayResult]);
 
   // Compute displayed log content
   const displayedLog = useMemo(() => {
@@ -299,6 +343,12 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
               Logs
               {isActive && <span className="modal-tab-badge live-badge">LIVE</span>}
             </button>
+            <button
+              className={`modal-tab${activeTab === 'timeline' ? ' active' : ''}`}
+              onClick={() => setActiveTab('timeline')}
+            >
+              Timeline
+            </button>
           </div>
         )}
 
@@ -471,6 +521,103 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
                 />
               )}
             </div>
+          </div>
+        )}
+
+        {activeTab === 'timeline' && (
+          <div className="modal-section modal-timeline-section">
+            {replayLoading && <p className="text-muted">Loading timeline...</p>}
+            {replayError && <p className="text-error">Error: {replayError}</p>}
+            {!replayLoading && replayTimeline && replayTimeline.length === 0 && (
+              <p className="text-muted">No replay data recorded for this task. Replay data is captured for new agent invocations.</p>
+            )}
+            {!replayLoading && replayTimeline && replayTimeline.length > 0 && (
+              <div className="timeline">
+                {replayTimeline.map((event, i) => {
+                  const eventKey = event.id || i;
+                  const isExpanded = expandedEventId === eventKey;
+                  return (
+                    <div
+                      key={eventKey}
+                      className={`timeline-event timeline-event-${event.type}${isExpanded ? ' expanded' : ''}`}
+                      onClick={() => setExpandedEventId(isExpanded ? null : eventKey)}
+                    >
+                      <div className="timeline-event-header">
+                        <span className={`timeline-event-icon timeline-icon-${event.type}`}>
+                          {event.type === 'prompt_sent' ? '>' :
+                           event.type === 'response_received' ? '<' :
+                           event.type === 'parsed_output' ? '{}' :
+                           event.type === 'error' ? '!' : '?'}
+                        </span>
+                        <span className="timeline-event-type">{formatEventType(event.type)}</span>
+                        <span className="timeline-event-phase">{event.phase}</span>
+                        {event.modelId && <span className="timeline-event-model">{event.modelId}</span>}
+                        {event.costUsd > 0 && <span className="timeline-event-cost">{formatCost(event.costUsd)}</span>}
+                        {event.durationMs && <span className="timeline-event-duration">{(event.durationMs / 1000).toFixed(1)}s</span>}
+                        <span className="timeline-event-time">
+                          {new Date(event.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      {isExpanded && (
+                        <div className="timeline-event-detail">
+                          {event.type === 'prompt_sent' && (
+                            <>
+                              <pre className="timeline-prompt">{event.prompt}</pre>
+                              <button
+                                className="btn btn-replay"
+                                disabled={replayRunning}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setReplayRunning(true);
+                                  api.replayTaskPhase(task.id, event.phase)
+                                    .catch(err => {
+                                      setReplayRunning(false);
+                                    });
+                                }}
+                              >
+                                {replayRunning ? 'Replaying...' : 'Replay This Prompt'}
+                              </button>
+                            </>
+                          )}
+                          {event.type === 'response_received' && (
+                            <>
+                              <div className="timeline-stats">
+                                {event.inputTokens != null && <span>Input: {formatTokens(event.inputTokens)}</span>}
+                                {event.outputTokens != null && <span>Output: {formatTokens(event.outputTokens)}</span>}
+                                {event.numTurns != null && <span>Turns: {event.numTurns}</span>}
+                              </div>
+                              <pre className="timeline-response">{event.rawResponse}</pre>
+                            </>
+                          )}
+                          {event.type === 'parsed_output' && (
+                            <pre className="timeline-parsed">
+                              {typeof event.parsedResult === 'string'
+                                ? event.parsedResult
+                                : JSON.stringify(event.parsedResult, null, 2)}
+                            </pre>
+                          )}
+                          {event.type === 'error' && (
+                            <>
+                              <p className="timeline-error-msg">{event.error}</p>
+                              {event.stack && <pre className="timeline-stack">{event.stack}</pre>}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {replayResult && (
+                  <div className="timeline-replay-result">
+                    <h4>Replay Result</h4>
+                    {replayResult.error
+                      ? <p className="text-error">{replayResult.error}</p>
+                      : <pre className="timeline-response">{replayResult.rawResponse}</pre>
+                    }
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

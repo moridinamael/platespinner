@@ -13,6 +13,7 @@ import * as state from '../state.js';
 import { LOGS_DIR } from '../state.js';
 import { registerAgent, unregisterAgent } from '../census.js';
 import { emitNotification, checkAllTasksDone } from '../notifications.js';
+import { writeReplayEvent, compressReplayLog } from './replay.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
 
@@ -261,6 +262,11 @@ export async function runGeneration(project, templateId, modelId, promptContent)
   broadcast('generation:started', { projectId: project.id });
   const agentId = registerAgent({ type: 'generating', projectId: project.id, modelId });
 
+  writeReplayEvent(project.id, 'generation', {
+    type: 'prompt_sent', phase: 'generation', projectId: project.id, modelId, prompt,
+    cmd, args: args.filter(a => a !== prompt),
+  });
+
   try {
     const { promise } = spawnAgent(
       cmd, args, project.path,
@@ -270,7 +276,20 @@ export async function runGeneration(project, templateId, modelId, promptContent)
     );
     const stdout = await promise;
     const costData = extractCostData(stdout, prompt, modelId);
+
+    writeReplayEvent(project.id, 'generation', {
+      type: 'response_received', phase: 'generation', projectId: project.id, modelId,
+      rawResponse: stdout.slice(0, 100000),
+      costUsd: costData.costUsd, inputTokens: costData.inputTokens,
+      outputTokens: costData.outputTokens, durationMs: costData.durationMs, numTurns: costData.numTurns,
+    });
+
     const proposals = parseGenerationOutput(costData.agentText);
+
+    writeReplayEvent(project.id, 'generation', {
+      type: 'parsed_output', phase: 'generation', projectId: project.id,
+      parsedResult: proposals, proposalCount: proposals.length,
+    });
 
     // Dedup: skip proposals whose title matches an existing task for this project
     const existingTitles = new Set(
@@ -313,12 +332,17 @@ export async function runGeneration(project, templateId, modelId, promptContent)
 
     return createdTasks;
   } catch (err) {
+    writeReplayEvent(project.id, 'generation', {
+      type: 'error', phase: 'generation', projectId: project.id,
+      error: err.message, stack: err.stack?.slice(0, 2000),
+    });
     broadcast('generation:failed', {
       projectId: project.id,
       error: err.message,
     });
     throw err;
   } finally {
+    compressReplayLog(project.id, 'generation').catch(() => {});
     unregisterAgent(agentId);
   }
 }
@@ -334,6 +358,11 @@ export async function runPlanning(task, modelId) {
   state.updateTask(task.id, { status: 'planning' });
   broadcast('planning:started', { taskId: task.id });
   const agentId = registerAgent({ type: 'planning', projectId: project.id, taskId: task.id, modelId });
+
+  writeReplayEvent(task.id, 'planning', {
+    type: 'prompt_sent', phase: 'planning', taskId: task.id, projectId: project.id, modelId, prompt,
+    cmd, args: args.filter(a => a !== prompt),
+  });
 
   const { stream: logStream } = createLogStream(task.id, 'planning');
 
@@ -351,7 +380,20 @@ export async function runPlanning(task, modelId) {
   try {
     const stdout = await promise;
     const costData = extractCostData(stdout, prompt, modelId);
+
+    writeReplayEvent(task.id, 'planning', {
+      type: 'response_received', phase: 'planning', taskId: task.id, modelId,
+      rawResponse: stdout.slice(0, 100000),
+      costUsd: costData.costUsd, inputTokens: costData.inputTokens,
+      outputTokens: costData.outputTokens, durationMs: costData.durationMs,
+    });
+
     const plan = parsePlanningOutput(costData.agentText);
+
+    writeReplayEvent(task.id, 'planning', {
+      type: 'parsed_output', phase: 'planning', taskId: task.id,
+      parsedResult: typeof plan === 'string' ? plan.slice(0, 10000) : plan,
+    });
 
     const planningCost = costData.costUsd || 0;
     const existingCost = task.costUsd || 0;
@@ -369,6 +411,10 @@ export async function runPlanning(task, modelId) {
 
     return updated;
   } catch (err) {
+    writeReplayEvent(task.id, 'planning', {
+      type: 'error', phase: 'planning', taskId: task.id,
+      error: err.message, stack: err.stack?.slice(0, 2000),
+    });
     // Task may have been dismissed while planning — skip updates if removed
     if (state.getTask(task.id)) {
       state.updateTask(task.id, { status: 'proposed', agentLog: err.message });
@@ -384,6 +430,7 @@ export async function runPlanning(task, modelId) {
     throw err;
   } finally {
     logStream.end();
+    compressReplayLog(task.id, 'planning').catch(() => {});
     state.removeProcess(task.id);
     unregisterAgent(agentId);
   }
@@ -447,6 +494,11 @@ export async function runExecution(task, modelId) {
   broadcast('execution:started', { taskId: task.id });
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
 
+  writeReplayEvent(task.id, 'execution', {
+    type: 'prompt_sent', phase: 'execution', taskId: task.id, projectId: project.id, modelId, prompt,
+    cmd, args: args.filter(a => a !== prompt),
+  });
+
   const stopPolling = pollGitStatus(cwd, task.id);
   const { stream: logStream } = createLogStream(task.id, 'execution');
 
@@ -466,6 +518,19 @@ export async function runExecution(task, modelId) {
     const stdout = await promise;
     const costData = extractCostData(stdout, prompt, modelId);
     const result = parseExecutionOutput(costData.agentText);
+
+    writeReplayEvent(task.id, 'execution', {
+      type: 'response_received', phase: 'execution', taskId: task.id, modelId,
+      rawResponse: stdout.slice(0, 100000),
+      costUsd: costData.costUsd, inputTokens: costData.inputTokens,
+      outputTokens: costData.outputTokens, durationMs: costData.durationMs, numTurns: costData.numTurns,
+      exitCode: 0,
+    });
+
+    writeReplayEvent(task.id, 'execution', {
+      type: 'parsed_output', phase: 'execution', taskId: task.id,
+      parsedResult: { commitHash: result.commitHash, summary: result.summary?.slice(0, 10000) },
+    });
 
     // Capture diff between pre-execution HEAD and post-execution state
     let diff = null;
@@ -558,6 +623,10 @@ export async function runExecution(task, modelId) {
 
     return updated;
   } catch (err) {
+    writeReplayEvent(task.id, 'execution', {
+      type: 'error', phase: 'execution', taskId: task.id,
+      error: err.message, stack: err.stack?.slice(0, 2000),
+    });
     const aborted = state.wasAborted(task.id);
     const revertStatus = task.plan ? 'planned' : 'proposed';
     const agentLog = aborted
@@ -575,6 +644,7 @@ export async function runExecution(task, modelId) {
     if (!aborted) throw err;
   } finally {
     logStream.end();
+    compressReplayLog(task.id, 'execution').catch(() => {});
     // Checkout back to base branch if we created a per-task branch
     if (baseBranch) {
       try {
@@ -614,6 +684,11 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
   broadcast('execution:started', { taskId: task.id });
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
 
+  writeReplayEvent(task.id, 'execution', {
+    type: 'prompt_sent', phase: 'execution', taskId: task.id, projectId: project.id, modelId, prompt,
+    cmd, args: args.filter(a => a !== prompt),
+  });
+
   const stopPolling = pollGitStatus(wtCwd, task.id);
   const { stream: wtLogStream } = createLogStream(task.id, 'execution');
 
@@ -633,6 +708,18 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     const stdout = await promise;
     const costData = extractCostData(stdout, prompt, modelId);
     const result = parseExecutionOutput(costData.agentText);
+
+    writeReplayEvent(task.id, 'execution', {
+      type: 'response_received', phase: 'execution', taskId: task.id, modelId,
+      rawResponse: stdout.slice(0, 100000),
+      costUsd: costData.costUsd, inputTokens: costData.inputTokens,
+      outputTokens: costData.outputTokens, durationMs: costData.durationMs, numTurns: costData.numTurns,
+    });
+
+    writeReplayEvent(task.id, 'execution', {
+      type: 'parsed_output', phase: 'execution', taskId: task.id,
+      parsedResult: { commitHash: result.commitHash, summary: result.summary?.slice(0, 10000) },
+    });
 
     // Capture diff between pre-execution HEAD and post-execution state
     let diff = null;
@@ -673,6 +760,10 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     broadcast('execution:completed', { taskId: task.id, ...broadcastUpdates, result, costUsd: executionCost });
     return updated;
   } catch (err) {
+    writeReplayEvent(task.id, 'execution', {
+      type: 'error', phase: 'execution', taskId: task.id,
+      error: err.message, stack: err.stack?.slice(0, 2000),
+    });
     const revertStatus = task.plan ? 'planned' : 'proposed';
     const agentLog = `Execution failed in worktree: ${err.message}`;
     state.updateTask(task.id, { status: revertStatus, agentLog });
@@ -680,13 +771,14 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     throw err;
   } finally {
     wtLogStream.end();
+    compressReplayLog(task.id, 'execution').catch(() => {});
     state.removeProcess(task.id);
     stopPolling();
     unregisterAgent(agentId);
   }
 }
 
-export { spawnAgent };
+export { spawnAgent, extractCostData };
 
 export async function runTestSetup(project, testInfo) {
   if (!state.lockProject(project.id)) {
@@ -699,6 +791,11 @@ export async function runTestSetup(project, testInfo) {
   broadcast('setup-tests:started', { projectId: project.id });
   const agentId = registerAgent({ type: 'settingUpTests', projectId: project.id, modelId: DEFAULT_MODEL_ID });
 
+  writeReplayEvent(project.id, 'testSetup', {
+    type: 'prompt_sent', phase: 'testSetup', projectId: project.id, modelId: DEFAULT_MODEL_ID, prompt,
+    cmd, args: args.filter(a => a !== prompt),
+  });
+
   try {
     const { promise } = spawnAgent(
       cmd, args, project.path,
@@ -708,7 +805,20 @@ export async function runTestSetup(project, testInfo) {
     );
     const stdout = await promise;
     const costData = extractCostData(stdout, prompt, DEFAULT_MODEL_ID);
+
+    writeReplayEvent(project.id, 'testSetup', {
+      type: 'response_received', phase: 'testSetup', projectId: project.id, modelId: DEFAULT_MODEL_ID,
+      rawResponse: stdout.slice(0, 100000),
+      costUsd: costData.costUsd, inputTokens: costData.inputTokens,
+      outputTokens: costData.outputTokens, durationMs: costData.durationMs,
+    });
+
     const result = parseTestSetupOutput(costData.agentText);
+
+    writeReplayEvent(project.id, 'testSetup', {
+      type: 'parsed_output', phase: 'testSetup', projectId: project.id,
+      parsedResult: { success: result.success, summary: result.summary, testCommand: result.testCommand },
+    });
 
     // If the agent reported a test command, validate and save it on the project
     if (result.testCommand) {
@@ -728,12 +838,17 @@ export async function runTestSetup(project, testInfo) {
 
     return result;
   } catch (err) {
+    writeReplayEvent(project.id, 'testSetup', {
+      type: 'error', phase: 'testSetup', projectId: project.id,
+      error: err.message, stack: err.stack?.slice(0, 2000),
+    });
     broadcast('setup-tests:failed', {
       projectId: project.id,
       error: err.message,
     });
     throw err;
   } finally {
+    compressReplayLog(project.id, 'testSetup').catch(() => {});
     state.unlockProject(project.id);
     advanceQueue(project.id);
     unregisterAgent(agentId);

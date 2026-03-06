@@ -6,7 +6,9 @@ import * as state from '../state.js';
 import { LOGS_DIR } from '../state.js';
 import { broadcast } from '../ws.js';
 import { toWSLPath } from '../paths.js';
-import { runGeneration, runExecution, runPlanning } from '../agents/runner.js';
+import { runGeneration, runExecution, runPlanning, spawnAgent, extractCostData } from '../agents/runner.js';
+import { readReplayLog, getReplayMeta } from '../agents/replay.js';
+import { buildGenerationCommand } from '../agents/cli.js';
 import { emitNotification } from '../notifications.js';
 
 const router = Router();
@@ -307,6 +309,84 @@ router.get('/tasks/:id/logs/:phase', (req, res) => {
     createReadStream(logFile).pipe(res);
   } catch {
     return res.status(404).json({ error: 'Log file not found' });
+  }
+});
+
+// --- Replay Timeline endpoints ---
+
+router.get('/tasks/:id/replay', (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  const phases = getReplayMeta(task.id);
+  const timeline = [];
+  for (const phase of phases) {
+    const events = readReplayLog(task.id, phase);
+    timeline.push(...events);
+  }
+
+  // Also check project-level generation replay
+  const genEvents = readReplayLog(task.projectId, 'generation');
+  if (genEvents.length > 0) timeline.push(...genEvents);
+
+  // Check project-level judgment replay
+  const judgmentEvents = readReplayLog(task.projectId, 'judgment');
+  if (judgmentEvents.length > 0) timeline.push(...judgmentEvents);
+
+  // Check project-level testSetup replay
+  const testSetupEvents = readReplayLog(task.projectId, 'testSetup');
+  if (testSetupEvents.length > 0) timeline.push(...testSetupEvents);
+
+  timeline.sort((a, b) => a.timestamp - b.timestamp);
+  res.json({ taskId: task.id, phases, events: timeline });
+});
+
+router.get('/tasks/:id/replay/:phase', (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  const phase = req.params.phase;
+  if (!['generation', 'planning', 'execution', 'judgment', 'testSetup'].includes(phase)) {
+    return res.status(400).json({ error: 'Invalid phase' });
+  }
+
+  const entityId = (phase === 'generation' || phase === 'judgment' || phase === 'testSetup') ? task.projectId : task.id;
+  const events = readReplayLog(entityId, phase);
+  res.json({ taskId: task.id, phase, events });
+});
+
+router.post('/tasks/:id/replay/:phase', async (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  const phase = req.params.phase;
+  const entityId = (phase === 'generation' || phase === 'judgment' || phase === 'testSetup') ? task.projectId : task.id;
+  const events = readReplayLog(entityId, phase);
+
+  const promptEvent = events.find(e => e.type === 'prompt_sent');
+  if (!promptEvent) {
+    return res.status(404).json({ error: 'No prompt found for this phase' });
+  }
+
+  const project = state.getProject(task.projectId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+
+  // Always use read-only generation command for safety
+  const { cmd, args, useStdin } = buildGenerationCommand(promptEvent.modelId, promptEvent.prompt);
+
+  res.json({ message: 'Replay started', phase });
+
+  try {
+    const { promise } = spawnAgent(
+      cmd, args, project.path,
+      useStdin ? promptEvent.prompt : null,
+      (bytes) => { broadcast('replay:progress', { taskId: task.id, phase, bytesReceived: bytes }); },
+      null
+    );
+    const stdout = await promise;
+    broadcast('replay:completed', { taskId: task.id, phase, rawResponse: stdout.slice(0, 100000) });
+  } catch (err) {
+    broadcast('replay:failed', { taskId: task.id, phase, error: err.message });
   }
 });
 
