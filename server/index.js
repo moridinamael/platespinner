@@ -15,6 +15,7 @@ import autoclickerRoutes from './routes/autoclicker.js';
 import notificationRoutes from './routes/notifications.js';
 import * as state from './state.js';
 import { broadcast } from './ws.js';
+import { startDigestScheduler, stopDigestScheduler } from './digest.js';
 
 function isPrivateIP(ip) {
   // Handle IPv4-mapped IPv6 (::ffff:x.x.x.x)
@@ -162,4 +163,8 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`WebSocket available on ws://localhost:${PORT}`);
+  startDigestScheduler();
 });
+
+process.on('SIGINT', () => { stopDigestScheduler(); process.exit(0); });
+process.on('SIGTERM', () => { stopDigestScheduler(); process.exit(0); });

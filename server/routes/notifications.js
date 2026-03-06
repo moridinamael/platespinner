@@ -1,16 +1,17 @@
 import { Router } from 'express';
 import { getNotificationSettings, updateNotificationSettings } from '../state.js';
 import { broadcast } from '../ws.js';
-import { emitNotification, addSSEClient, removeSSEClient } from '../notifications.js';
+import { emitNotification, addSSEClient, removeSSEClient, sendSlackNotification, sendDiscordNotification, sendEmailNotification } from '../notifications.js';
 
 const router = Router();
 
 // Get notification settings
 router.get('/notifications/settings', (req, res) => {
   const settings = getNotificationSettings(req.query.projectId || null);
-  // Mask webhook secret in response
+  // Mask secrets in response
   const masked = { ...settings };
   if (masked.webhookSecret) masked.webhookSecret = '****';
+  if (masked.smtpPass) masked.smtpPass = '****';
   res.json(masked);
 });
 
@@ -18,7 +19,7 @@ router.get('/notifications/settings', (req, res) => {
 router.patch('/notifications/settings', (req, res) => {
   const { projectId, ...updates } = req.body;
 
-  // Validate webhook URL if provided
+  // Validate generic webhook URL if provided
   if (updates.webhookUrl && updates.webhookUrl.trim()) {
     try {
       const parsed = new URL(updates.webhookUrl.trim());
@@ -30,12 +31,41 @@ router.patch('/notifications/settings', (req, res) => {
     }
   }
 
+  // Validate Slack webhook URL
+  if (updates.slackWebhookUrl && updates.slackWebhookUrl.trim()) {
+    try {
+      const parsed = new URL(updates.slackWebhookUrl.trim());
+      if (parsed.protocol !== 'https:') {
+        return res.status(400).json({ error: 'Slack webhook URL must be HTTPS' });
+      }
+    } catch {
+      return res.status(400).json({ error: 'Invalid Slack webhook URL' });
+    }
+  }
+
+  // Validate Discord webhook URL
+  if (updates.discordWebhookUrl && updates.discordWebhookUrl.trim()) {
+    try {
+      const parsed = new URL(updates.discordWebhookUrl.trim());
+      if (parsed.protocol !== 'https:') {
+        return res.status(400).json({ error: 'Discord webhook URL must be HTTPS' });
+      }
+    } catch {
+      return res.status(400).json({ error: 'Invalid Discord webhook URL' });
+    }
+  }
+
+  // Validate SMTP port if provided
+  if (updates.smtpPort != null && (updates.smtpPort < 1 || updates.smtpPort > 65535)) {
+    return res.status(400).json({ error: 'Invalid SMTP port' });
+  }
+
   const updated = updateNotificationSettings(projectId || null, updates);
   broadcast('notification-settings:updated', { projectId: projectId || 'global', settings: updated });
   res.json(updated);
 });
 
-// Send a test notification
+// Send a test notification (all channels)
 router.post('/notifications/test', async (req, res) => {
   const { projectId } = req.body;
   await emitNotification('test:notification', {
@@ -43,6 +73,72 @@ router.post('/notifications/test', async (req, res) => {
     message: 'This is a test notification from Kanban Agents',
   });
   res.json({ sent: true });
+});
+
+// Test Slack webhook specifically
+router.post('/notifications/test-slack', async (req, res) => {
+  const { projectId } = req.body;
+  const settings = getNotificationSettings(projectId || null);
+  if (!settings.slackWebhookUrl) {
+    return res.status(400).json({ error: 'No Slack webhook URL configured' });
+  }
+  try {
+    const notification = {
+      type: 'test:notification',
+      timestamp: Date.now(),
+      projectId: projectId || null,
+      projectName: 'Test',
+      message: 'This is a test Slack notification from Kanban Agents',
+    };
+    await sendSlackNotification(settings.slackWebhookUrl, notification);
+    res.json({ sent: true });
+  } catch (err) {
+    res.status(500).json({ error: `Slack test failed: ${err.message}` });
+  }
+});
+
+// Test Discord webhook specifically
+router.post('/notifications/test-discord', async (req, res) => {
+  const { projectId } = req.body;
+  const settings = getNotificationSettings(projectId || null);
+  if (!settings.discordWebhookUrl) {
+    return res.status(400).json({ error: 'No Discord webhook URL configured' });
+  }
+  try {
+    const notification = {
+      type: 'test:notification',
+      timestamp: Date.now(),
+      projectId: projectId || null,
+      projectName: 'Test',
+      message: 'This is a test Discord notification from Kanban Agents',
+    };
+    await sendDiscordNotification(settings.discordWebhookUrl, notification);
+    res.json({ sent: true });
+  } catch (err) {
+    res.status(500).json({ error: `Discord test failed: ${err.message}` });
+  }
+});
+
+// Test email specifically
+router.post('/notifications/test-email', async (req, res) => {
+  const { projectId } = req.body;
+  const settings = getNotificationSettings(projectId || null);
+  if (!settings.smtpHost || !settings.emailRecipients) {
+    return res.status(400).json({ error: 'SMTP host and email recipients must be configured' });
+  }
+  try {
+    const notification = {
+      type: 'test:notification',
+      timestamp: Date.now(),
+      projectId: projectId || null,
+      projectName: 'Test',
+      message: 'This is a test email notification from Kanban Agents',
+    };
+    await sendEmailNotification(settings, notification);
+    res.json({ sent: true });
+  } catch (err) {
+    res.status(500).json({ error: `Email test failed: ${err.message}` });
+  }
 });
 
 // Server-Sent Events endpoint

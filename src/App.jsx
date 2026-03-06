@@ -526,6 +526,7 @@ export default function App() {
             'all-tasks:done': 'All Tasks Done!',
             'test:failure': 'Tests Failed',
             'budget:exceeded': 'Budget Exceeded',
+            'cost:threshold-exceeded': 'Cost Threshold Exceeded',
             'test:notification': 'Test Notification',
           };
           const title = titleMap[data.type] || 'Kanban Notification';

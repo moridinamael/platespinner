@@ -138,6 +138,8 @@ function Sidebar({
   const fetchAbortRef = useRef(null);
   const [showNotifSettings, setShowNotifSettings] = useState(false);
   const [webhookUrlLocal, setWebhookUrlLocal] = useState('');
+  const [slackUrlLocal, setSlackUrlLocal] = useState('');
+  const [discordUrlLocal, setDiscordUrlLocal] = useState('');
 
   // Autoclicker local state
   const [acEnabled, setAcEnabled] = useState(false);
@@ -220,8 +222,10 @@ function Sidebar({
   useEffect(() => {
     if (notificationSettings) {
       setWebhookUrlLocal(notificationSettings.webhookUrl === '****' ? '****' : (notificationSettings.webhookUrl || ''));
+      setSlackUrlLocal(notificationSettings.slackWebhookUrl || '');
+      setDiscordUrlLocal(notificationSettings.discordWebhookUrl || '');
     }
-  }, [notificationSettings?.webhookUrl]);
+  }, [notificationSettings?.webhookUrl, notificationSettings?.slackWebhookUrl, notificationSettings?.discordWebhookUrl]);
 
   useEffect(() => () => clearTimeout(confirmTimerRef.current), []);
 
@@ -459,6 +463,131 @@ function Sidebar({
                 </label>
               )}
 
+              <label className="setting-field">
+                <span className="setting-label">Slack Webhook URL</span>
+                <input
+                  type="text"
+                  className="input input-sm"
+                  placeholder="https://hooks.slack.com/services/..."
+                  value={slackUrlLocal}
+                  onChange={(e) => setSlackUrlLocal(e.target.value)}
+                  onBlur={(e) => {
+                    const val = e.target.value.trim();
+                    if (val !== (notificationSettings.slackWebhookUrl || '')) {
+                      onUpdateNotificationSettings({ slackWebhookUrl: val });
+                    }
+                  }}
+                />
+              </label>
+
+              <label className="setting-field">
+                <span className="setting-label">Discord Webhook URL</span>
+                <input
+                  type="text"
+                  className="input input-sm"
+                  placeholder="https://discord.com/api/webhooks/..."
+                  value={discordUrlLocal}
+                  onChange={(e) => setDiscordUrlLocal(e.target.value)}
+                  onBlur={(e) => {
+                    const val = e.target.value.trim();
+                    if (val !== (notificationSettings.discordWebhookUrl || '')) {
+                      onUpdateNotificationSettings({ discordWebhookUrl: val });
+                    }
+                  }}
+                />
+              </label>
+
+              <details className="notif-smtp-details">
+                <summary className="setting-label">Email (SMTP)</summary>
+                <label className="setting-field">
+                  <span className="setting-label">SMTP Host</span>
+                  <input
+                    type="text"
+                    className="input input-sm"
+                    placeholder="smtp.gmail.com"
+                    defaultValue={notificationSettings.smtpHost || ''}
+                    onBlur={(e) => onUpdateNotificationSettings({ smtpHost: e.target.value.trim() })}
+                  />
+                </label>
+                <label className="setting-field">
+                  <span className="setting-label">SMTP Port</span>
+                  <input
+                    type="number"
+                    className="input input-sm"
+                    placeholder="587"
+                    defaultValue={notificationSettings.smtpPort || 587}
+                    onBlur={(e) => onUpdateNotificationSettings({ smtpPort: parseInt(e.target.value) || 587 })}
+                  />
+                </label>
+                <label className="setting-field">
+                  <span className="setting-label">SMTP User</span>
+                  <input
+                    type="text"
+                    className="input input-sm"
+                    defaultValue={notificationSettings.smtpUser || ''}
+                    onBlur={(e) => onUpdateNotificationSettings({ smtpUser: e.target.value.trim() })}
+                  />
+                </label>
+                <label className="setting-field">
+                  <span className="setting-label">SMTP Password</span>
+                  <input
+                    type="password"
+                    className="input input-sm"
+                    defaultValue=""
+                    onBlur={(e) => {
+                      if (e.target.value) {
+                        onUpdateNotificationSettings({ smtpPass: e.target.value });
+                      }
+                    }}
+                  />
+                </label>
+                <label className="setting-field">
+                  <span className="setting-label">From Address</span>
+                  <input
+                    type="text"
+                    className="input input-sm"
+                    placeholder="kanban@example.com"
+                    defaultValue={notificationSettings.smtpFrom || ''}
+                    onBlur={(e) => onUpdateNotificationSettings({ smtpFrom: e.target.value.trim() })}
+                  />
+                </label>
+                <label className="setting-field">
+                  <span className="setting-label">Recipients (comma-separated)</span>
+                  <input
+                    type="text"
+                    className="input input-sm"
+                    placeholder="team@example.com"
+                    defaultValue={notificationSettings.emailRecipients || ''}
+                    onBlur={(e) => onUpdateNotificationSettings({ emailRecipients: e.target.value.trim() })}
+                  />
+                </label>
+                <label className="setting-field setting-field-row">
+                  <input
+                    type="checkbox"
+                    className="setting-checkbox"
+                    checked={!!notificationSettings.emailDigestEnabled}
+                    onChange={(e) => onUpdateNotificationSettings({ emailDigestEnabled: e.target.checked })}
+                  />
+                  <span className="setting-label">Daily digest (instead of instant)</span>
+                </label>
+                {notificationSettings.emailDigestEnabled && (
+                  <label className="setting-field">
+                    <span className="setting-label">Digest hour (0-23)</span>
+                    <input
+                      type="number"
+                      className="input input-sm"
+                      min="0"
+                      max="23"
+                      defaultValue={notificationSettings.emailDigestHour ?? 9}
+                      onBlur={(e) => onUpdateNotificationSettings({ emailDigestHour: parseInt(e.target.value) || 9 })}
+                    />
+                  </label>
+                )}
+                <button className="btn btn-sm" onClick={() => api.testEmailNotification()}>
+                  Test Email
+                </button>
+              </details>
+
               <div className="notif-events-section">
                 <span className="setting-label">Events</span>
                 {[
@@ -466,6 +595,8 @@ function Sidebar({
                   ['taskFailed', 'Task failed'],
                   ['allTasksDone', 'All tasks done'],
                   ['testFailure', 'Test failure'],
+                  ['budgetExceeded', 'Budget exceeded'],
+                  ['costThresholdExceeded', 'Cost threshold exceeded'],
                 ].map(([key, label]) => (
                   <label key={key} className="setting-field setting-field-row">
                     <input
@@ -482,6 +613,24 @@ function Sidebar({
                   </label>
                 ))}
               </div>
+
+              {notificationSettings.events?.costThresholdExceeded && (
+                <label className="setting-field">
+                  <span className="setting-label">Cost threshold ($)</span>
+                  <input
+                    type="number"
+                    className="input input-sm"
+                    step="0.01"
+                    min="0"
+                    placeholder="5.00"
+                    defaultValue={notificationSettings.costThresholdUsd || ''}
+                    onBlur={(e) => {
+                      const val = e.target.value ? parseFloat(e.target.value) : null;
+                      onUpdateNotificationSettings({ costThresholdUsd: val });
+                    }}
+                  />
+                </label>
+              )}
 
               <button className="btn btn-sm" onClick={onTestNotification}>
                 Send Test Notification

@@ -7,6 +7,7 @@ import { LOGS_DIR } from '../state.js';
 import { broadcast } from '../ws.js';
 import { toWSLPath } from '../paths.js';
 import { runGeneration, runExecution, runPlanning } from '../agents/runner.js';
+import { emitNotification } from '../notifications.js';
 
 const router = Router();
 
@@ -129,6 +130,13 @@ router.post('/tasks/:id/execute', async (req, res) => {
     const projectTasks = state.getTasks(task.projectId);
     const totalSpent = projectTasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
     if (totalSpent >= project.budgetLimitUsd) {
+      emitNotification('budget:exceeded', {
+        projectId: project.id,
+        taskId: task.id,
+        taskTitle: task.title,
+        totalSpent,
+        limit: project.budgetLimitUsd,
+      });
       return res.status(400).json({
         error: 'Budget limit exceeded',
         totalSpent,

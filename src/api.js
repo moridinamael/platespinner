@@ -49,6 +49,9 @@ export const api = {
   getNotificationSettings: (projectId) => request('GET', projectId ? `/notifications/settings?projectId=${projectId}` : '/notifications/settings'),
   updateNotificationSettings: (projectId, data) => request('PATCH', '/notifications/settings', { projectId, ...data }),
   testNotification: (projectId) => request('POST', '/notifications/test', { projectId }),
+  testSlackNotification: (projectId) => request('POST', '/notifications/test-slack', { projectId }),
+  testDiscordNotification: (projectId) => request('POST', '/notifications/test-discord', { projectId }),
+  testEmailNotification: (projectId) => request('POST', '/notifications/test-email', { projectId }),
   getProjectCosts: (id) => request('GET', `/projects/${id}/costs`),
   getCostsSummary: () => request('GET', '/costs/summary'),
   mergeTask: (projectId, taskId, strategy) => request('POST', `/projects/${projectId}/tasks/${taskId}/merge`, { strategy }),
@@ -100,7 +103,7 @@ export class WebSocketManager {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {

@@ -512,6 +512,16 @@ function defaultNotificationSettings() {
     browserNotifications: true,
     webhookUrl: '',
     webhookSecret: '',
+    slackWebhookUrl: '',
+    discordWebhookUrl: '',
+    smtpHost: '',
+    smtpPort: 587,
+    smtpUser: '',
+    smtpPass: '',
+    smtpFrom: '',
+    emailRecipients: '',
+    emailDigestEnabled: false,
+    emailDigestHour: 9,
     desktopNotifications: false,
     events: {
       taskCompleted: true,
@@ -519,7 +529,9 @@ function defaultNotificationSettings() {
       allTasksDone: true,
       testFailure: true,
       budgetExceeded: false,
+      costThresholdExceeded: false,
     },
+    costThresholdUsd: null,
   };
 }
 

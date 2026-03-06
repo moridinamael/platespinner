@@ -401,6 +401,13 @@ export async function runExecution(task, modelId) {
   const budget = checkBudget(project);
   if (!budget.allowed) {
     state.unlockProject(project.id);
+    emitNotification('budget:exceeded', {
+      projectId: project.id,
+      taskId: task.id,
+      taskTitle: task.title,
+      totalSpent: budget.totalSpent,
+      limit: budget.limit,
+    });
     throw new Error(`Budget limit exceeded: $${budget.totalSpent.toFixed(2)} spent of $${budget.limit.toFixed(2)} limit`);
   }
 
@@ -514,6 +521,19 @@ export async function runExecution(task, modelId) {
         projectId: project.id,
         taskCount: state.getTasks(project.id).length,
       });
+    }
+
+    // Check cost threshold after cost is accumulated
+    const thresholdSettings = state.getNotificationSettings(project.id);
+    if (thresholdSettings.costThresholdUsd != null) {
+      const costSummary = state.getProjectCostSummary(project.id);
+      if (costSummary.totalCost >= thresholdSettings.costThresholdUsd) {
+        emitNotification('cost:threshold-exceeded', {
+          projectId: project.id,
+          totalCost: costSummary.totalCost,
+          threshold: thresholdSettings.costThresholdUsd,
+        });
+      }
     }
 
     // Auto-test after execution commit if enabled
