@@ -1270,13 +1270,16 @@ html, body {
   text-align: center;
   padding: 40px 20px;
   margin: 0 4px 4px;
-  border: 1.5px dashed var(--border);
+  background: var(--surface);
   border-radius: var(--radius);
+  opacity: 0.6;
+  animation: empty-state-in 0.4s ease-out;
 }
 
 .column-empty-icon {
   margin-bottom: 12px;
-  opacity: 0.5;
+  opacity: 0.45;
+  color: var(--text-dim);
 }
 
 .column-empty-text {
@@ -1649,11 +1652,26 @@ html, body {
   .activity-spinner-arc {
     animation: spinner-rotate 2s linear infinite;
   }
+  .column-empty {
+    animation: none;
+    opacity: 0.6;
+  }
 }
 
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes empty-state-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 0.6;
+    transform: translateY(0);
+  }
 }
 
 @keyframes modal-scale-up {
