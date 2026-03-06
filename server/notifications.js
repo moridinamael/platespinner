@@ -34,7 +34,7 @@ function formatNotificationTitle(notification) {
     'cost:threshold-exceeded': 'Cost Threshold Exceeded',
     'test:notification': 'Test Notification',
   };
-  return titles[notification.type] || 'Kanban Notification';
+  return titles[notification.type] || 'PlateSpinner Notification';
 }
 
 function formatNotificationBody(notification) {
@@ -187,7 +187,7 @@ export async function sendEmailNotification(settings, notification) {
     await transport.sendMail({
       from: settings.smtpFrom || settings.smtpUser || 'kanban@localhost',
       to: settings.emailRecipients,
-      subject: `[Kanban] ${title} — ${notification.projectName}`,
+      subject: `[PlateSpinner] ${title} — ${notification.projectName}`,
       text: `${title}\n\nProject: ${notification.projectName}\nEvent: ${notification.type}\n\n${body}`,
       html: `<h2>${title}</h2><p><strong>Project:</strong> ${notification.projectName}</p><p><strong>Event:</strong> ${notification.type}</p><p>${body}</p>`,
     });
@@ -205,7 +205,7 @@ async function sendDesktopNotification(notification) {
     if (!notifier) {
       notifier = (await import('node-notifier')).default;
     }
-    const title = `Kanban: ${notification.type}`;
+    const title = `PlateSpinner: ${notification.type}`;
     const message = notification.taskTitle || notification.summary || notification.message || notification.type;
     notifier.notify({ title, message, sound: true });
   } catch {

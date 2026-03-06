@@ -530,7 +530,7 @@ export default function App() {
             'cost:threshold-exceeded': 'Cost Threshold Exceeded',
             'test:notification': 'Test Notification',
           };
-          const title = titleMap[data.type] || 'Kanban Notification';
+          const title = titleMap[data.type] || 'PlateSpinner Notification';
           const body = data.taskTitle || data.summary || data.message || '';
           new Notification(title, {
             body: `${data.projectName}: ${body}`,

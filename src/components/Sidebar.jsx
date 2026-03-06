@@ -367,7 +367,7 @@ function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <h1 className="sidebar-title">Kanban Agents</h1>
+        <h1 className="sidebar-title">PlateSpinner</h1>
         <button
           className="theme-toggle"
           onClick={onToggleTheme}

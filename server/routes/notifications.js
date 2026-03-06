@@ -70,7 +70,7 @@ router.post('/notifications/test', async (req, res) => {
   const { projectId } = req.body;
   await emitNotification('test:notification', {
     projectId: projectId || null,
-    message: 'This is a test notification from Kanban Agents',
+    message: 'This is a test notification from PlateSpinner',
   });
   res.json({ sent: true });
 });
@@ -88,7 +88,7 @@ router.post('/notifications/test-slack', async (req, res) => {
       timestamp: Date.now(),
       projectId: projectId || null,
       projectName: 'Test',
-      message: 'This is a test Slack notification from Kanban Agents',
+      message: 'This is a test Slack notification from PlateSpinner',
     };
     await sendSlackNotification(settings.slackWebhookUrl, notification);
     res.json({ sent: true });
@@ -110,7 +110,7 @@ router.post('/notifications/test-discord', async (req, res) => {
       timestamp: Date.now(),
       projectId: projectId || null,
       projectName: 'Test',
-      message: 'This is a test Discord notification from Kanban Agents',
+      message: 'This is a test Discord notification from PlateSpinner',
     };
     await sendDiscordNotification(settings.discordWebhookUrl, notification);
     res.json({ sent: true });
@@ -132,7 +132,7 @@ router.post('/notifications/test-email', async (req, res) => {
       timestamp: Date.now(),
       projectId: projectId || null,
       projectName: 'Test',
-      message: 'This is a test email notification from Kanban Agents',
+      message: 'This is a test email notification from PlateSpinner',
     };
     await sendEmailNotification(settings, notification);
     res.json({ sent: true });

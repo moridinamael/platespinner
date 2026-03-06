@@ -69,7 +69,7 @@ async function sendDigestEmail(settings, digestData) {
   const totalCost = digestData.reduce((sum, d) => sum + d.costSummary.totalCost, 0);
 
   // Build plain text
-  let text = `Kanban Daily Digest\n${'='.repeat(40)}\n\n`;
+  let text = `PlateSpinner Daily Digest\n${'='.repeat(40)}\n\n`;
   text += `Summary: ${totalCompleted} tasks completed, $${totalCost.toFixed(2)} total cost\n\n`;
 
   for (const { project, completedRecently, failedRecently, costSummary } of digestData) {
@@ -94,7 +94,7 @@ async function sendDigestEmail(settings, digestData) {
   }
 
   // Build HTML
-  let html = `<h1>Kanban Daily Digest</h1>`;
+  let html = `<h1>PlateSpinner Daily Digest</h1>`;
   html += `<p><strong>${totalCompleted}</strong> tasks completed | <strong>$${totalCost.toFixed(2)}</strong> total cost</p>`;
 
   for (const { project, completedRecently, failedRecently, costSummary } of digestData) {
@@ -137,7 +137,7 @@ async function sendDigestEmail(settings, digestData) {
     await transport.sendMail({
       from: settings.smtpFrom || settings.smtpUser || 'kanban@localhost',
       to: settings.emailRecipients,
-      subject: `[Kanban] Daily Digest — ${totalCompleted} tasks, $${totalCost.toFixed(2)}`,
+      subject: `[PlateSpinner] Daily Digest — ${totalCompleted} tasks, $${totalCost.toFixed(2)}`,
       text,
       html,
     });

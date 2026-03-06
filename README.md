@@ -2,7 +2,7 @@
 
 AI-powered kanban board that uses CLI tools (Claude Code, Codex, Gemini) to generate, plan, and execute development tasks against your local projects. Spin up autonomous agents and watch them work.
 
-<!-- ![Screenshot](screenshot.png) -->
+![PlateSpinner screenshot](docs/screenshot.png)
 
 ## Features
 
@@ -31,7 +31,7 @@ AI-powered kanban board that uses CLI tools (Claude Code, Codex, Gemini) to gene
 
 ```bash
 git clone https://github.com/moridinamael/platespinner.git
-cd kanban-interface
+cd platespinner
 npm install
 npm start
 ```
