@@ -13,15 +13,16 @@ const ActivitySpinner = ({ variant }) => (
   </svg>
 );
 
-function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, isFocused }) {
+function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, isFocused, onRetry }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
   const isQueued = task.status === 'queued';
   const isExecuting = task.status === 'executing';
   const isDone = task.status === 'done';
+  const isFailed = task.status === 'failed';
 
-  const isDraggable = isProposed || isPlanned;
+  const isDraggable = isProposed || isPlanned || isFailed;
   const {
     attributes,
     listeners,
@@ -82,7 +83,7 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
         {isQueued && queuePosition && (
           <span className="queue-position-badge">#{queuePosition} in queue</span>
         )}
-        {(isProposed || isPlanned || isPlanning || isQueued) && (
+        {(isProposed || isPlanned || isPlanning || isQueued || isFailed) && (
           <button
             className={`card-dismiss${confirmingDismiss ? ' confirming' : ''}`}
             onClick={(e) => {
@@ -190,6 +191,19 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
             {task.branch.length > 30 ? task.branch.slice(0, 27) + '...' : task.branch}
           </span>
         )}
+
+        {isFailed && (
+          <span className="executing-status">
+            <span className="failed-badge">Failed{task.failureCount > 1 ? ` (x${task.failureCount})` : ''}</span>
+            <button
+              className="btn btn-sm btn-execute"
+              onClick={(e) => { e.stopPropagation(); onRetry(task.id); }}
+              title="Retry with new planning pass"
+            >
+              Retry
+            </button>
+          </span>
+        )}
       </div>
 
       {isDone && task.branch && (
@@ -225,6 +239,20 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
       )}
 
       {isDone && task.agentLog && (
+        <details className="card-log" onClick={(e) => e.stopPropagation()}>
+          <summary>Agent log</summary>
+          <pre>{task.agentLog}</pre>
+        </details>
+      )}
+
+      {isFailed && task.lastTestOutput && (
+        <details className="card-log" onClick={(e) => e.stopPropagation()}>
+          <summary>Test failure output</summary>
+          <pre>{task.lastTestOutput.slice(0, 5000)}</pre>
+        </details>
+      )}
+
+      {isFailed && task.agentLog && (
         <details className="card-log" onClick={(e) => e.stopPropagation()}>
           <summary>Agent log</summary>
           <pre>{task.agentLog}</pre>

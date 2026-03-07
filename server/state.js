@@ -252,6 +252,8 @@ export function addTask({ projectId, title, description, rationale, effort, gene
     diff: null,
     tokenUsage: null,
     costUsd: 0,
+    failureCount: 0,
+    lastTestOutput: null,
     createdAt: Date.now(),
     sortOrder: Date.now(),
   };

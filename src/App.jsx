@@ -794,13 +794,24 @@ export default function App() {
     }
   }, []);
 
+  const handleRetry = useCallback(async (taskId) => {
+    try {
+      await api.retryTask(taskId);
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 3000);
+    }
+  }, []);
+
   const handleMoveTask = useCallback(async (taskId, sourceCol, targetCol) => {
     if (sourceCol === 'proposed' && targetCol === 'plan') {
       handlePlan(taskId);
     } else if ((sourceCol === 'proposed' || sourceCol === 'plan') && targetCol === 'executing') {
       handleExecute(taskId);
+    } else if (sourceCol === 'failed' && (targetCol === 'proposed' || targetCol === 'plan' || targetCol === 'executing')) {
+      handleRetry(taskId);
     }
-  }, [handlePlan, handleExecute]);
+  }, [handlePlan, handleExecute, handleRetry]);
 
   const handleStopAll = useCallback(async () => {
     try {
@@ -1236,6 +1247,7 @@ export default function App() {
               focusedTaskId={focusedTaskId}
               onReorderTasks={handleReorderTasks}
               onMoveTask={handleMoveTask}
+              onRetry={handleRetry}
             />
             {selectedIds.size > 0 && (
               <BulkActionBar

@@ -42,7 +42,7 @@ router.patch('/tasks/reorder', (req, res) => {
 router.patch('/tasks/:id', (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'proposed' && task.status !== 'planned') {
+  if (task.status !== 'proposed' && task.status !== 'planned' && task.status !== 'failed') {
     return res.status(400).json({ error: `Cannot edit task with status '${task.status}'` });
   }
 
@@ -101,8 +101,8 @@ router.post('/generate', async (req, res) => {
 router.post('/tasks/:id/plan', async (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'proposed') {
-    return res.status(400).json({ error: `Task is ${task.status}, not proposed` });
+  if (task.status !== 'proposed' && task.status !== 'failed') {
+    return res.status(400).json({ error: `Task is ${task.status}, not proposed or failed` });
   }
 
   const { modelId } = req.body || {};
@@ -120,8 +120,8 @@ router.post('/tasks/:id/plan', async (req, res) => {
 router.post('/tasks/:id/execute', async (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'proposed' && task.status !== 'planned') {
-    return res.status(400).json({ error: `Task is ${task.status}, expected proposed or planned` });
+  if (task.status !== 'proposed' && task.status !== 'planned' && task.status !== 'failed') {
+    return res.status(400).json({ error: `Task is ${task.status}, expected proposed, planned, or failed` });
   }
 
   const { modelId } = req.body || {};
@@ -213,6 +213,28 @@ router.post('/tasks/:id/abort', (req, res) => {
   }, 5000);
 
   res.json({ message: 'Abort signal sent', taskId: task.id });
+});
+
+router.post('/tasks/:id/retry', (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  if (task.status !== 'failed') {
+    return res.status(400).json({ error: `Task is ${task.status}, not failed` });
+  }
+
+  // Reset to 'proposed' to trigger a fresh planning pass with failure context
+  // Keep plan, lastTestOutput, failureCount, and agentLog so the next planner/executor has context
+  state.updateTask(task.id, {
+    status: 'proposed',
+    commitHash: null,
+    diff: null,
+    branch: null,
+    baseBranch: null,
+    executedBy: null,
+  });
+  broadcast('task:updated', state.getTask(task.id));
+
+  res.json({ message: 'Task reset for retry', taskId: task.id });
 });
 
 router.post('/tasks/:id/dismiss', (req, res) => {
@@ -432,9 +454,11 @@ router.post('/tasks/batch', async (req, res) => {
     }
     runNext();
   } else if (action === 'execute') {
+    const MAX_TASK_FAILURES = 3;
     const validTasks = taskIds
       .map(id => state.getTask(id))
-      .filter(t => t && (t.status === 'planned' || t.status === 'proposed'))
+      .filter(t => t && (t.status === 'planned' || t.status === 'proposed' || t.status === 'failed'))
+      .filter(t => (t.failureCount || 0) < MAX_TASK_FAILURES)
       .sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
     if (validTasks.length === 0) {
       return res.json({ message: 'No tasks to execute', count: 0 });

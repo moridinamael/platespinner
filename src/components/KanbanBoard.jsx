@@ -8,9 +8,10 @@ const COLUMNS = [
   { key: 'plan', title: 'Plan', statuses: ['planning', 'planned'] },
   { key: 'executing', title: 'Executing', statuses: ['queued', 'executing'] },
   { key: 'done', title: 'Done', statuses: ['done'] },
+  { key: 'failed', title: 'Failed', statuses: ['failed'] },
 ];
 
-function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive, onPlanAll, onExecuteAll, focusedTaskId, onReorderTasks, onMoveTask }) {
+function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive, onPlanAll, onExecuteAll, focusedTaskId, onReorderTasks, onMoveTask, onRetry }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -121,6 +122,7 @@ function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecut
             onPlanAll={onPlanAll}
             onExecuteAll={onExecuteAll}
             focusedTaskId={focusedTaskId}
+            onRetry={onRetry}
           />
         ))}
       </div>

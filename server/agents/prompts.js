@@ -113,6 +113,10 @@ IMPORTANT: Your output MUST contain the result wrapped in <test-setup-result> ta
 }
 
 export function buildPlanningPrompt(task) {
+  const testFailureContext = task.lastTestOutput
+    ? `\n\n## Previous Test Failure\n\nThis task was previously executed but the implementation broke existing tests. The commit was reverted. Your plan MUST account for these test failures.\n\n**Test output:**\n\`\`\`\n${task.lastTestOutput.slice(0, 10000)}\n\`\`\`\n\n---\n`
+    : '';
+
   return `${planningSkill}
 
 ---
@@ -122,7 +126,7 @@ export function buildPlanningPrompt(task) {
 **Title:** ${task.title}
 **Description:** ${task.description}
 **Rationale:** ${task.rationale}
-
+${testFailureContext}
 Analyze the codebase at the current working directory and produce a detailed implementation plan for this task.
 
 IMPORTANT: Your output MUST contain the plan wrapped in <implementation-plan> tags exactly as specified in the instructions above. Do not output anything after the closing </implementation-plan> tag.`;
@@ -141,6 +145,10 @@ export function buildExecutionPrompt(task) {
     ? `\n\n## Prior Attempt\n\nA previous execution agent attempted this task but failed. There may be partial changes in the working directory. Review the current state before proceeding.\n\n**Agent log:** ${task.agentLog}\n\n---\n`
     : '';
 
+  const testFailureContext = task.lastTestOutput
+    ? `\n\n## Previous Test Failure\n\nThe previous execution attempt passed but broke existing tests. The commit was automatically reverted. Your implementation MUST ensure all tests pass.\n\n**Test output (last failure):**\n\`\`\`\n${task.lastTestOutput.slice(0, 10000)}\n\`\`\`\n\n---\n`
+    : '';
+
   return `${rubricSkill}
 
 ---
@@ -150,7 +158,7 @@ export function buildExecutionPrompt(task) {
 **Title:** ${task.title}
 **Description:** ${task.description}
 **Rationale:** ${task.rationale}
-${planSection}${branchSection}${priorAttempt}
+${planSection}${branchSection}${priorAttempt}${testFailureContext}
 Implement this task in the current working directory. Follow the rubric process: analyze, create rubric, implement, verify, self-score, then git commit.
 
 IMPORTANT: Your output MUST contain the result wrapped in <execution-result> tags exactly as specified in the instructions above. Do not output anything after the closing </execution-result> tag.`;
@@ -164,6 +172,7 @@ export function buildJudgmentPrompt(project, tasks, templates, gitLog, testResul
     effort: t.effort,
     description: t.description?.slice(0, 200),
     plan: t.plan ? 'yes' : 'no',
+    failureCount: t.failureCount || 0,
   }));
 
   const templatesSummary = templates.map(t => ({ id: t.id, name: t.name }));

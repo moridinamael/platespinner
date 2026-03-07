@@ -645,24 +645,80 @@ export async function runExecution(task, modelId) {
       }
     }
 
-    // Auto-test after execution commit if enabled
+    // Test-gated execution: run tests after a successful commit when autoTestOnCommit is enabled
     if (result.commitHash && project.autoTestOnCommit) {
-      broadcast('project:test-started', { projectId: project.id });
-      runTests(project).then((testResult) => {
-        broadcast('project:test-completed', { projectId: project.id, passed: testResult.passed, summary: testResult.summary, output: testResult.output });
+      broadcast('project:test-started', { projectId: project.id, taskId: task.id });
+      try {
+        const testResult = await runTests(project);
+        state.updateProject(project.id, {
+          lastTestResult: {
+            passed: testResult.passed,
+            summary: testResult.summary,
+            output: testResult.output,
+            timestamp: Date.now(),
+          },
+        });
+        broadcast('project:test-completed', {
+          projectId: project.id,
+          taskId: task.id,
+          passed: testResult.passed,
+          summary: testResult.summary,
+        });
+
         if (!testResult.passed) {
+          // ROLLBACK: revert the commit
+          const revertCwd = toWSLPath(project.path);
+          if (project.branchStrategy === 'per-task' && preCommitHash) {
+            // Per-task branch: safe to hard reset
+            try {
+              await gitExec(['reset', '--hard', preCommitHash], revertCwd);
+            } catch (resetErr) {
+              console.error('Git reset failed:', resetErr.message);
+            }
+          } else {
+            // Direct branch: use revert to preserve history
+            try {
+              await gitExec(['revert', '--no-edit', result.commitHash], revertCwd);
+            } catch (revertErr) {
+              console.error('Git revert failed:', revertErr.message);
+              try { await gitExec(['revert', '--abort'], revertCwd); } catch { /* ignore */ }
+            }
+          }
+
+          // Mark task as failed
+          const currentTask = state.getTask(task.id);
+          const newFailureCount = (currentTask.failureCount || 0) + 1;
+          state.updateTask(task.id, {
+            status: 'failed',
+            failureCount: newFailureCount,
+            lastTestOutput: (testResult.output || testResult.summary || '').slice(0, 50000),
+            agentLog: `Test-gated execution failed (attempt #${newFailureCount}). Tests did not pass after commit ${result.commitHash.slice(0, 7)}.\n\nTest summary: ${testResult.summary}`,
+          });
+          broadcast('execution:test-failed', {
+            taskId: task.id,
+            commitHash: result.commitHash,
+            testSummary: testResult.summary,
+            failureCount: newFailureCount,
+            status: 'failed',
+          });
           emitNotification('test:failure', {
             projectId: project.id,
+            taskId: task.id,
+            taskTitle: task.title,
             summary: testResult.summary,
           });
+
+          return state.getTask(task.id);
         }
-      }).catch((err) => {
-        broadcast('project:test-completed', { projectId: project.id, passed: false, summary: err.message || 'Auto-test failed', output: '' });
-        emitNotification('test:failure', {
+      } catch (testErr) {
+        console.error('Test execution error:', testErr.message);
+        broadcast('project:test-completed', {
           projectId: project.id,
-          summary: err.message || 'Auto-test failed',
+          taskId: task.id,
+          passed: false,
+          summary: testErr.message || 'Test execution error',
         });
-      });
+      }
     }
 
     return updated;

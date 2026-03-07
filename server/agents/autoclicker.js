@@ -14,6 +14,7 @@ let activeProcessCount = 0;
 const projectCycleStatus = new Map(); // projectId → status string
 const MAX_CYCLES_PER_PROJECT = 50;
 const MAX_CONSECUTIVE_FAILURES = 3;
+const MAX_TASK_FAILURES = 3; // Don't re-execute tasks that failed N times without human review
 const DEBUG = !!process.env.DEBUG_AUTOCLICKER;
 
 function _sleep(ms) {
@@ -148,14 +149,25 @@ async function _runProjectCycle(project) {
       await runGeneration(project, decision.templateId, DEFAULT_MODEL_ID);
     } else if (decision.action === 'plan') {
       const task = state.getTask(decision.targetTaskId);
-      if (task && task.status === 'proposed') {
+      if (task && (task.status === 'proposed' || task.status === 'failed')) {
         projectCycleStatus.set(project.id, 'planning');
         broadcast('autoclicker:phase', { projectId: project.id, phase: 'planning' });
         await runPlanning(task, DEFAULT_MODEL_ID);
       }
     } else if (decision.action === 'execute') {
       const task = state.getTask(decision.targetTaskId);
-      if (task && (task.status === 'proposed' || task.status === 'planned')) {
+      if (task && (task.status === 'proposed' || task.status === 'planned' || task.status === 'failed')) {
+        // Check failure cap — don't re-execute tasks that keep failing
+        if ((task.failureCount || 0) >= MAX_TASK_FAILURES) {
+          broadcast('autoclicker:decision', {
+            projectId: project.id,
+            decision: { ...decision, action: 'skip', reasoning: `Task "${task.title}" has failed ${task.failureCount} times — requires human review` },
+            costUsd: judgmentCost?.costUsd || null,
+          });
+          projectCycleStatus.set(project.id, 'idle');
+          state.incrementCycleCount(project.id);
+          return;
+        }
         if (state.isProjectLocked(project.id)) {
           // Project already has an execution running — queue instead
           state.updateTask(task.id, { status: 'queued', executedBy: DEFAULT_MODEL_ID });
