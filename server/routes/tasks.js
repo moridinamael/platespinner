@@ -12,6 +12,7 @@ import { buildGenerationCommand } from '../agents/cli.js';
 import { emitNotification } from '../notifications.js';
 import { findSimilarTasks } from '../similarity.js';
 import { isValidUUID, validateStringField, validateEnum } from '../validation.js';
+import { canEdit, canPlan, canExecute, canDequeue, canAbort, canRetry } from '../taskStateMachine.js';
 
 const router = Router();
 
@@ -61,8 +62,9 @@ router.patch('/tasks/reorder', (req, res) => {
 router.patch('/tasks/:id', (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'proposed' && task.status !== 'planned' && task.status !== 'failed') {
-    return res.status(400).json({ error: `Cannot edit task with status '${task.status}'` });
+  const editGuard = canEdit(task);
+  if (!editGuard.allowed) {
+    return res.status(400).json({ error: editGuard.reason });
   }
 
   const EDITABLE_FIELDS = ['title', 'description', 'rationale', 'effort', 'plan', 'dependencies'];
@@ -158,8 +160,9 @@ router.post('/generate', async (req, res) => {
 router.post('/tasks/:id/plan', async (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'proposed' && task.status !== 'failed') {
-    return res.status(400).json({ error: `Task is ${task.status}, not proposed or failed` });
+  const planGuard = canPlan(task);
+  if (!planGuard.allowed) {
+    return res.status(400).json({ error: planGuard.reason });
   }
 
   if (state.isTaskBlocked(task.id)) {
@@ -187,8 +190,9 @@ router.post('/tasks/:id/plan', async (req, res) => {
 router.post('/tasks/:id/execute', async (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'proposed' && task.status !== 'planned' && task.status !== 'failed') {
-    return res.status(400).json({ error: `Task is ${task.status}, expected proposed, planned, or failed` });
+  const execGuard = canExecute(task);
+  if (!execGuard.allowed) {
+    return res.status(400).json({ error: execGuard.reason });
   }
 
   if (state.isTaskBlocked(task.id)) {
@@ -246,8 +250,9 @@ router.post('/tasks/:id/execute', async (req, res) => {
 router.post('/tasks/:id/dequeue', (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'queued') {
-    return res.status(400).json({ error: `Task is ${task.status}, not queued` });
+  const dequeueGuard = canDequeue(task);
+  if (!dequeueGuard.allowed) {
+    return res.status(400).json({ error: dequeueGuard.reason });
   }
 
   state.removeFromQueue(task.projectId, task.id);
@@ -261,8 +266,9 @@ router.post('/tasks/:id/dequeue', (req, res) => {
 router.post('/tasks/:id/abort', (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'executing') {
-    return res.status(400).json({ error: `Task is ${task.status}, not executing` });
+  const abortGuard = canAbort(task);
+  if (!abortGuard.allowed) {
+    return res.status(400).json({ error: abortGuard.reason });
   }
 
   const handle = state.getProcess(task.id);
@@ -295,8 +301,9 @@ router.post('/tasks/:id/abort', (req, res) => {
 router.post('/tasks/:id/retry', (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'failed') {
-    return res.status(400).json({ error: `Task is ${task.status}, not failed` });
+  const retryGuard = canRetry(task);
+  if (!retryGuard.allowed) {
+    return res.status(400).json({ error: retryGuard.reason });
   }
 
   // Reset to 'proposed' to trigger a fresh planning pass with failure context
@@ -573,7 +580,7 @@ router.post('/tasks/batch', async (req, res) => {
   if (action === 'plan') {
     const validTasks = taskIds
       .map(id => state.getTask(id))
-      .filter(t => t && t.status === 'proposed');
+      .filter(t => t && canPlan(t).allowed);
     if (validTasks.length === 0) {
       return res.json({ message: 'No proposed tasks to plan', count: 0 });
     }
@@ -598,7 +605,7 @@ router.post('/tasks/batch', async (req, res) => {
     const MAX_TASK_FAILURES = 3;
     const validTasks = taskIds
       .map(id => state.getTask(id))
-      .filter(t => t && (t.status === 'planned' || t.status === 'proposed' || t.status === 'failed'))
+      .filter(t => t && canExecute(t).allowed)
       .filter(t => (t.failureCount || 0) < MAX_TASK_FAILURES)
       .sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
     if (validTasks.length === 0) {

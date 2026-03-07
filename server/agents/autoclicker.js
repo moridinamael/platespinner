@@ -8,6 +8,7 @@ import { parseJudgmentOutput, extractClaudeJsonOutput } from './parser.js';
 import { runGeneration, runPlanning, runExecution, spawnAgent } from './runner.js';
 import { writeReplayEvent, compressReplayLog } from './replay.js';
 import * as state from '../state.js';
+import { canPlan, canExecute } from '../taskStateMachine.js';
 
 let orchestratorRunning = false;
 let activeProcessCount = 0;
@@ -152,14 +153,14 @@ async function _runProjectCycle(project) {
       await runGeneration(project, decision.templateId, DEFAULT_MODEL_ID);
     } else if (decision.action === 'plan') {
       const task = state.getTask(decision.targetTaskId);
-      if (task && (task.status === 'proposed' || task.status === 'failed')) {
+      if (task && canPlan(task).allowed) {
         projectCycleStatus.set(project.id, 'planning');
         broadcast('autoclicker:phase', { projectId: project.id, phase: 'planning' });
         await runPlanning(task, DEFAULT_MODEL_ID);
       }
     } else if (decision.action === 'execute') {
       const task = state.getTask(decision.targetTaskId);
-      if (task && (task.status === 'proposed' || task.status === 'planned' || task.status === 'failed')) {
+      if (task && canExecute(task).allowed) {
         // Check failure cap — don't re-execute tasks that keep failing
         if ((task.failureCount || 0) >= MAX_TASK_FAILURES) {
           broadcast('autoclicker:decision', {
