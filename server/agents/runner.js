@@ -1,11 +1,12 @@
 import { spawn, execFile, execFileSync } from 'child_process';
 import { createWriteStream, mkdirSync, statSync } from 'fs';
+import { homedir } from 'os';
 import { join } from 'path';
 import { broadcast } from '../ws.js';
 import { buildGenerationCommand, buildExecutionCommand, buildTestSetupCommand } from './cli.js';
 import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, buildTestSetupPrompt, buildJudgmentPrompt, getBuiltInTemplates } from './prompts.js';
 import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput, parseJudgmentOutput, extractClaudeJsonOutput, estimateTokensFromText } from './parser.js';
-import { toWSLPath, EXTRA_PATH_DIRS } from '../paths.js';
+import { toWSLPath } from '../paths.js';
 import { DEFAULT_MODEL_ID, getModel, estimateCost } from '../models.js';
 import { runTests, validateTestCommand } from '../testing.js';
 import * as state from '../state.js';
@@ -160,6 +161,15 @@ function getLoginPath() {
   }
   return _loginPath;
 }
+
+// Extra tool directories that may not be in shell configs
+const HOME = homedir();
+const EXTRA_PATH_DIRS = [
+  `${HOME}/go/bin`,
+  `${HOME}/.cargo/bin`,
+  `${HOME}/.local/bin`,
+  `${HOME}/.npm-global/bin`,
+].join(':');
 
 // Clean env: remove CLAUDECODE to allow nested sessions, merge login PATH + extra dirs
 function cleanEnv() {

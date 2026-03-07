@@ -1,4 +1,4 @@
-import { platform, homedir } from 'os';
+import { platform } from 'os';
 
 /**
  * Convert a Windows path to a WSL path if needed.
@@ -22,11 +22,3 @@ export function toWSLPath(p) {
   // Backslashes but no drive letter — just convert slashes
   return p.replace(/\\/g, '/');
 }
-
-const HOME = homedir();
-export const EXTRA_PATH_DIRS = [
-  `${HOME}/go/bin`,
-  `${HOME}/.cargo/bin`,
-  `${HOME}/.local/bin`,
-  `${HOME}/.npm-global/bin`,
-].join(':');
