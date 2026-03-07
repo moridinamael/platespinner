@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, memo } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { api } from '../api.js';
-import { getModelLabel, getModelProvider, formatCost, formatTokens, formatLogSize, escapeHtml } from '../utils.js';
+import { getModelLabel, getModelProvider, formatCost, formatTokens, formatLogSize, escapeHtml, sanitizeAnsiHtml } from '../utils.js';
 import DiffViewer from './DiffViewer.jsx';
 import DependencyEditor from './DependencyEditor.jsx';
 import DependencyGraph from './DependencyGraph.jsx';
@@ -193,7 +193,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
       ? displayedLog.slice(-512000) + '\n\n... (truncated, showing last 500KB) ...'
       : displayedLog;
     try {
-      return ansiConverter.toHtml(text);
+      return sanitizeAnsiHtml(ansiConverter.toHtml(text));
     } catch {
       return escapeHtml(text);
     }

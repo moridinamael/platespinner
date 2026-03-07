@@ -89,6 +89,34 @@ export function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+export function sanitizeAnsiHtml(html) {
+  // Allow only tags that ansi-to-html legitimately produces:
+  // <span style="..."> </span> <b> </b> <u> </u> <br/> <br>
+  return html.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b([^>]*)\/?>/g, (match, tag, attrs) => {
+    const tagLower = tag.toLowerCase();
+    // Self-closing br
+    if (tagLower === 'br') return '<br/>';
+    // Closing tags for allowed elements
+    if (match.startsWith('</')) {
+      if (['span', 'b', 'u'].includes(tagLower)) return match;
+      return '';
+    }
+    // Opening tags
+    if (tagLower === 'b' || tagLower === 'u') return match;
+    if (tagLower === 'span') {
+      // Only allow style attribute, strip everything else (especially on* handlers)
+      const styleMatch = attrs.match(/\bstyle\s*=\s*"([^"]*)"/i);
+      if (styleMatch) {
+        const style = styleMatch[1].replace(/expression\s*\(|javascript\s*:|url\s*\(/gi, '');
+        return `<span style="${style}">`;
+      }
+      return '<span>';
+    }
+    // Strip all other tags (remove tag, keep inner text)
+    return '';
+  });
+}
+
 export function formatTokens(count) {
   if (!count) return '0';
   if (count < 1000) return String(count);
