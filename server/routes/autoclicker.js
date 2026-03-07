@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { startOrchestrator, stopOrchestrator, getOrchestratorStatus } from '../agents/autoclicker.js';
 import * as state from '../state.js';
+import { isValidUUID } from '../validation.js';
 
 const router = Router();
 
@@ -9,6 +10,10 @@ router.post('/autoclicker/start', (req, res) => {
 
   if (!enabledProjectIds || !Array.isArray(enabledProjectIds) || enabledProjectIds.length === 0) {
     return res.status(400).json({ error: 'enabledProjectIds must be a non-empty array' });
+  }
+  const invalidId = enabledProjectIds.find(id => !isValidUUID(id));
+  if (invalidId) {
+    return res.status(400).json({ error: `Invalid project ID format: ${invalidId}` });
   }
 
   const mp = Math.min(Math.max(parseInt(maxParallel) || 3, 1), 10);

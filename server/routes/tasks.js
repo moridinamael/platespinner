@@ -11,11 +11,22 @@ import { readReplayLog, getReplayMeta } from '../agents/replay.js';
 import { buildGenerationCommand } from '../agents/cli.js';
 import { emitNotification } from '../notifications.js';
 import { findSimilarTasks } from '../similarity.js';
+import { isValidUUID, validateStringField, validateEnum } from '../validation.js';
 
 const router = Router();
 
+router.param('id', (req, res, next, value) => {
+  if (!isValidUUID(value)) {
+    return res.status(400).json({ error: 'Invalid task ID format: expected a UUID' });
+  }
+  next();
+});
+
 router.get('/tasks', (req, res) => {
   const { projectId } = req.query;
+  if (projectId && !isValidUUID(projectId)) {
+    return res.status(400).json({ error: 'Invalid projectId format: expected a UUID' });
+  }
   const tasks = state.getTasks(projectId);
   // Strip diff field from list response to keep payload small
   res.json(tasks.map(({ diff, ...rest }) => rest));
@@ -23,6 +34,9 @@ router.get('/tasks', (req, res) => {
 
 router.get('/tasks/queue', (req, res) => {
   const { projectId } = req.query;
+  if (projectId && !isValidUUID(projectId)) {
+    return res.status(400).json({ error: 'Invalid projectId format: expected a UUID' });
+  }
   if (projectId) {
     res.json(state.getQueueSnapshot(projectId));
   } else {
@@ -34,6 +48,10 @@ router.patch('/tasks/reorder', (req, res) => {
   const { orderedIds } = req.body;
   if (!Array.isArray(orderedIds)) {
     return res.status(400).json({ error: 'orderedIds[] is required' });
+  }
+  const invalidReorderId = orderedIds.find(id => !isValidUUID(id));
+  if (invalidReorderId) {
+    return res.status(400).json({ error: `Invalid task ID format: ${invalidReorderId}` });
   }
   state.reorderTasks(orderedIds);
   broadcast('tasks:reordered', { orderedIds });
@@ -55,12 +73,21 @@ router.patch('/tasks/:id', (req, res) => {
     }
   }
 
+  const STRING_LIMITS = { title: 200, description: 5000, rationale: 2000, plan: 50000 };
+  for (const [field, maxLen] of Object.entries(STRING_LIMITS)) {
+    if (field in updates) {
+      const err = validateStringField(updates[field], field, { maxLength: maxLen });
+      if (err) return res.status(400).json({ error: err });
+    }
+  }
+
   if (Object.keys(updates).length === 0) {
     return res.status(400).json({ error: 'No editable fields provided' });
   }
 
-  if (updates.effort && !['small', 'medium', 'large'].includes(updates.effort)) {
-    return res.status(400).json({ error: 'effort must be small, medium, or large' });
+  if ('effort' in updates) {
+    const err = validateEnum(updates.effort, 'effort', ['small', 'medium', 'large']);
+    if (err) return res.status(400).json({ error: err });
   }
 
   if (updates.dependencies !== undefined) {
@@ -92,6 +119,10 @@ router.patch('/tasks/:id', (req, res) => {
 router.post('/generate', async (req, res) => {
   const { projectId, templateId, modelId, promptContent } = req.body;
   let projects;
+
+  if (projectId && !isValidUUID(projectId)) {
+    return res.status(400).json({ error: 'Invalid projectId format: expected a UUID' });
+  }
 
   if (projectId) {
     const project = state.getProject(projectId);
@@ -523,6 +554,10 @@ router.post('/tasks/batch', async (req, res) => {
   const { action, taskIds, modelId } = req.body;
   if (!action || !Array.isArray(taskIds)) {
     return res.status(400).json({ error: 'action and taskIds[] are required' });
+  }
+  const invalidBatchId = taskIds.find(id => !isValidUUID(id));
+  if (invalidBatchId) {
+    return res.status(400).json({ error: `Invalid task ID format: ${invalidBatchId}` });
   }
   if (!['plan', 'execute', 'dismiss'].includes(action)) {
     return res.status(400).json({ error: 'action must be plan, execute, or dismiss' });

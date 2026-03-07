@@ -9,6 +9,7 @@ import { MODELS } from '../models.js';
 import { emitNotification } from '../notifications.js';
 import { renderPRBody } from '../prUtils.js';
 import { trackPR, untrackPR, fetchPRStatus } from '../prStatus.js';
+import { isValidUUID, validateStringField } from '../validation.js';
 
 const RAILWAY_BIN = process.env.RAILWAY_BIN || 'railway';
 
@@ -48,13 +49,37 @@ async function checkRailwayHealth(project) {
 
 const router = Router();
 
+router.param('id', (req, res, next, value) => {
+  if (!isValidUUID(value)) {
+    return res.status(400).json({ error: 'Invalid project ID format: expected a UUID' });
+  }
+  next();
+});
+
+router.param('projectId', (req, res, next, value) => {
+  if (!isValidUUID(value)) {
+    return res.status(400).json({ error: 'Invalid project ID format: expected a UUID' });
+  }
+  next();
+});
+
+router.param('taskId', (req, res, next, value) => {
+  if (!isValidUUID(value)) {
+    return res.status(400).json({ error: 'Invalid task ID format: expected a UUID' });
+  }
+  next();
+});
+
 router.get('/projects', (req, res) => {
   res.json(state.getProjects());
 });
 
 router.post('/projects', (req, res) => {
   const { name, path } = req.body;
-  if (!path) return res.status(400).json({ error: 'path is required' });
+  const nameErr = validateStringField(name, 'name', { maxLength: 200 });
+  if (nameErr) return res.status(400).json({ error: nameErr });
+  const pathErr = validateStringField(path, 'path', { maxLength: 500, required: true });
+  if (pathErr) return res.status(400).json({ error: pathErr });
 
   const project = state.addProject({ name, path: toWSLPath(path) });
   broadcast('project:created', project);
@@ -70,6 +95,10 @@ router.patch('/projects/reorder', (req, res) => {
   if (!Array.isArray(orderedIds)) {
     return res.status(400).json({ error: 'orderedIds must be an array' });
   }
+  const invalidId = orderedIds.find(id => !isValidUUID(id));
+  if (invalidId) {
+    return res.status(400).json({ error: `Invalid project ID format: ${invalidId}` });
+  }
   state.reorderProjects(orderedIds);
   broadcast('projects:reordered', { orderedIds });
   res.json({ success: true });
@@ -80,6 +109,14 @@ router.patch('/projects/:id', (req, res) => {
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
   const updates = {};
+  if ('url' in req.body && req.body.url) {
+    const err = validateStringField(req.body.url, 'url', { maxLength: 2000 });
+    if (err) return res.status(400).json({ error: err });
+  }
+  if ('railwayProject' in req.body && req.body.railwayProject) {
+    const err = validateStringField(req.body.railwayProject, 'railwayProject', { maxLength: 200 });
+    if (err) return res.status(400).json({ error: err });
+  }
   if ('url' in req.body) updates.url = req.body.url || null;
   if ('testCommand' in req.body) {
     const cmd = req.body.testCommand || null;
@@ -101,6 +138,9 @@ router.patch('/projects/:id', (req, res) => {
   if ('budgetLimitUsd' in req.body) {
     const val = req.body.budgetLimitUsd;
     updates.budgetLimitUsd = (val === null || val === '') ? null : Number(val);
+    if (updates.budgetLimitUsd !== null && isNaN(updates.budgetLimitUsd)) {
+      return res.status(400).json({ error: 'budgetLimitUsd must be a number' });
+    }
   }
   if ('autoCreatePR' in req.body) updates.autoCreatePR = !!req.body.autoCreatePR;
   if ('prTemplate' in req.body) updates.prTemplate = req.body.prTemplate || null;
