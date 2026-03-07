@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { isValidUUID, validateStringField, validateEnum } from './validation.js';
+import { describe, it, expect, vi } from 'vitest';
+import { isValidUUID, validateStringField, validateEnum, validateBody } from './validation.js';
 
 describe('isValidUUID', () => {
   it('accepts valid v4 UUIDs', () => {
@@ -94,5 +94,120 @@ describe('validateEnum', () => {
 
   it('returns null for null (optional)', () => {
     expect(validateEnum(null, 'effort', allowed)).toBeNull();
+  });
+});
+
+describe('validateBody', () => {
+  function createMocks(body) {
+    const req = { body };
+    const res = {
+      _status: null,
+      _json: null,
+      status(code) { this._status = code; return this; },
+      json(data) { this._json = data; },
+    };
+    const next = vi.fn();
+    return { req, res, next };
+  }
+
+  it('calls next for valid body', () => {
+    const mw = validateBody({ name: { type: 'string', required: true } });
+    const { req, res, next } = createMocks({ name: 'hello' });
+    mw(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(res._status).toBeNull();
+  });
+
+  it('returns 400 for missing required field', () => {
+    const mw = validateBody({ name: { type: 'string', required: true } });
+    const { req, res, next } = createMocks({});
+    mw(req, res, next);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toBe('name is required');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for empty string on required field', () => {
+    const mw = validateBody({ name: { type: 'string', required: true } });
+    const { req, res, next } = createMocks({ name: '' });
+    mw(req, res, next);
+    expect(res._status).toBe(400);
+  });
+
+  it('returns 400 for wrong type', () => {
+    const mw = validateBody({ count: { type: 'number' } });
+    const { req, res, next } = createMocks({ count: 'abc' });
+    mw(req, res, next);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toBe('count must be a number');
+  });
+
+  it('returns 400 for NaN number', () => {
+    const mw = validateBody({ budget: { type: 'number' } });
+    const { req, res, next } = createMocks({ budget: NaN });
+    mw(req, res, next);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toBe('budget must be a valid number');
+  });
+
+  it('returns 400 for invalid enum value', () => {
+    const mw = validateBody({ size: { type: 'string', enum: ['s', 'm', 'l'] } });
+    const { req, res, next } = createMocks({ size: 'xl' });
+    mw(req, res, next);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toBe('size must be one of: s, m, l');
+  });
+
+  it('returns 400 for exceeding maxLength', () => {
+    const mw = validateBody({ name: { type: 'string', maxLength: 5 } });
+    const { req, res, next } = createMocks({ name: 'toolong' });
+    mw(req, res, next);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toBe('name must be 5 characters or fewer');
+  });
+
+  it('returns 400 for numeric min violation', () => {
+    const mw = validateBody({ age: { type: 'number', min: 0 } });
+    const { req, res, next } = createMocks({ age: -1 });
+    mw(req, res, next);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toBe('age must be at least 0');
+  });
+
+  it('returns 400 for numeric max violation', () => {
+    const mw = validateBody({ age: { type: 'number', max: 100 } });
+    const { req, res, next } = createMocks({ age: 101 });
+    mw(req, res, next);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toBe('age must be at most 100');
+  });
+
+  it('skips absent optional fields', () => {
+    const mw = validateBody({ name: { type: 'string' }, age: { type: 'number' } });
+    const { req, res, next } = createMocks({});
+    mw(req, res, next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('handles missing req.body', () => {
+    const mw = validateBody({ name: { type: 'string' } });
+    const { req, res, next } = createMocks(undefined);
+    mw(req, res, next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('validates array type', () => {
+    const mw = validateBody({ ids: { type: 'array', required: true } });
+    const { req, res, next } = createMocks({ ids: 'not-array' });
+    mw(req, res, next);
+    expect(res._status).toBe(400);
+    expect(res._json.error).toBe('ids must be an array');
+  });
+
+  it('accepts valid array', () => {
+    const mw = validateBody({ ids: { type: 'array', required: true } });
+    const { req, res, next } = createMocks({ ids: [1, 2] });
+    mw(req, res, next);
+    expect(next).toHaveBeenCalled();
   });
 });

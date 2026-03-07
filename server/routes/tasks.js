@@ -11,7 +11,7 @@ import { readReplayLog, getReplayMeta } from '../agents/replay.js';
 import { buildGenerationCommand } from '../agents/cli.js';
 import { emitNotification } from '../notifications.js';
 import { findSimilarTasks } from '../similarity.js';
-import { isValidUUID, validateStringField, validateEnum } from '../validation.js';
+import { isValidUUID, validateStringField, validateEnum, validateBody } from '../validation.js';
 
 const router = Router();
 
@@ -19,6 +19,9 @@ router.param('id', (req, res, next, value) => {
   if (!isValidUUID(value)) {
     return res.status(400).json({ error: 'Invalid task ID format: expected a UUID' });
   }
+  const task = state.getTask(value);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  req.task = task;
   next();
 });
 
@@ -59,8 +62,7 @@ router.patch('/tasks/reorder', (req, res) => {
 });
 
 router.patch('/tasks/:id', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const task = req.task;
   if (task.status !== 'proposed' && task.status !== 'planned' && task.status !== 'failed') {
     return res.status(400).json({ error: `Cannot edit task with status '${task.status}'` });
   }
@@ -120,7 +122,13 @@ router.patch('/tasks/:id', (req, res) => {
   res.json(updated);
 });
 
-router.post('/generate', async (req, res) => {
+router.post('/generate',
+  validateBody({
+    projectId: { type: 'string' },
+    templateId: { type: 'string' },
+    modelId: { type: 'string' },
+  }),
+  async (req, res) => {
   const { projectId, templateId, modelId, promptContent } = req.body;
   let projects;
 
@@ -155,9 +163,10 @@ router.post('/generate', async (req, res) => {
   }
 });
 
-router.post('/tasks/:id/plan', async (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+router.post('/tasks/:id/plan',
+  validateBody({ modelId: { type: 'string' } }),
+  async (req, res) => {
+  const task = req.task;
   if (task.status !== 'proposed' && task.status !== 'failed') {
     return res.status(400).json({ error: `Task is ${task.status}, not proposed or failed` });
   }
@@ -184,9 +193,10 @@ router.post('/tasks/:id/plan', async (req, res) => {
   }
 });
 
-router.post('/tasks/:id/execute', async (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+router.post('/tasks/:id/execute',
+  validateBody({ modelId: { type: 'string' } }),
+  async (req, res) => {
+  const task = req.task;
   if (task.status !== 'proposed' && task.status !== 'planned' && task.status !== 'failed') {
     return res.status(400).json({ error: `Task is ${task.status}, expected proposed, planned, or failed` });
   }
@@ -244,8 +254,7 @@ router.post('/tasks/:id/execute', async (req, res) => {
 });
 
 router.post('/tasks/:id/dequeue', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const task = req.task;
   if (task.status !== 'queued') {
     return res.status(400).json({ error: `Task is ${task.status}, not queued` });
   }
@@ -259,8 +268,7 @@ router.post('/tasks/:id/dequeue', (req, res) => {
 });
 
 router.post('/tasks/:id/abort', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const task = req.task;
   if (task.status !== 'executing') {
     return res.status(400).json({ error: `Task is ${task.status}, not executing` });
   }
@@ -293,8 +301,7 @@ router.post('/tasks/:id/abort', (req, res) => {
 });
 
 router.post('/tasks/:id/retry', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const task = req.task;
   if (task.status !== 'failed') {
     return res.status(400).json({ error: `Task is ${task.status}, not failed` });
   }
@@ -315,9 +322,7 @@ router.post('/tasks/:id/retry', (req, res) => {
 });
 
 router.post('/tasks/:id/dismiss', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   // Kill running agent subprocess if task is mid-planning or mid-execution
   const handle = state.getProcess(req.params.id);
   if (handle) {
@@ -339,9 +344,7 @@ router.post('/tasks/:id/dismiss', (req, res) => {
 // --- Diff endpoint ---
 
 router.get('/tasks/:id/diff', async (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   // Return stored diff if available
   if (task.diff) {
     return res.json({ diff: task.diff, source: 'stored' });
@@ -379,9 +382,7 @@ router.get('/tasks/:id/diff', async (req, res) => {
 // --- Log endpoints ---
 
 router.get('/tasks/:id/logs', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const phases = ['generation', 'planning', 'execution', 'judgment'];
   const available = [];
   for (const phase of phases) {
@@ -395,9 +396,7 @@ router.get('/tasks/:id/logs', (req, res) => {
 });
 
 router.get('/tasks/:id/logs/:phase', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const phase = req.params.phase;
   if (!['generation', 'planning', 'execution', 'judgment'].includes(phase)) {
     return res.status(400).json({ error: 'Invalid phase' });
@@ -417,9 +416,7 @@ router.get('/tasks/:id/logs/:phase', (req, res) => {
 // --- Replay Timeline endpoints ---
 
 router.get('/tasks/:id/replay', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const phases = getReplayMeta(task.id);
   const timeline = [];
   for (const phase of phases) {
@@ -444,9 +441,7 @@ router.get('/tasks/:id/replay', (req, res) => {
 });
 
 router.get('/tasks/:id/replay/:phase', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const phase = req.params.phase;
   if (!['generation', 'planning', 'execution', 'judgment', 'testSetup'].includes(phase)) {
     return res.status(400).json({ error: 'Invalid phase' });
@@ -458,9 +453,7 @@ router.get('/tasks/:id/replay/:phase', (req, res) => {
 });
 
 router.post('/tasks/:id/replay/:phase', async (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const phase = req.params.phase;
   const entityId = (phase === 'generation' || phase === 'judgment' || phase === 'testSetup') ? task.projectId : task.id;
   const events = readReplayLog(entityId, phase);
@@ -495,19 +488,20 @@ router.post('/tasks/:id/replay/:phase', async (req, res) => {
 // --- Similarity / duplicate resolution endpoints ---
 
 router.get('/tasks/:id/similar', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const existingTasks = state.getTasks(task.projectId)
     .filter(t => t.id !== task.id);
   const similar = findSimilarTasks(task, existingTasks, 0.2);
   res.json({ taskId: task.id, similar });
 });
 
-router.post('/tasks/:id/resolve-duplicate', (req, res) => {
+router.post('/tasks/:id/resolve-duplicate',
+  validateBody({
+    action: { type: 'string', required: true, enum: ['keep', 'skip', 'merge'] },
+  }),
+  (req, res) => {
   const { action, mergeIntoTaskId } = req.body;
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const task = req.task;
 
   if (action === 'skip') {
     state.removeTask(task.id);
@@ -542,9 +536,7 @@ router.post('/tasks/:id/resolve-duplicate', (req, res) => {
 // --- Dependency info endpoint ---
 
 router.get('/tasks/:id/dependencies', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const dependencies = state.getBlockers(task.id);
   const dependents = state.getDependents(task.id);
   const blocked = state.isTaskBlocked(task.id);
@@ -554,17 +546,16 @@ router.get('/tasks/:id/dependencies', (req, res) => {
 
 // --- Batch operations ---
 
-router.post('/tasks/batch', async (req, res) => {
+router.post('/tasks/batch',
+  validateBody({
+    action: { type: 'string', required: true, enum: ['plan', 'execute', 'dismiss'] },
+    taskIds: { type: 'array', required: true },
+  }),
+  async (req, res) => {
   const { action, taskIds, modelId } = req.body;
-  if (!action || !Array.isArray(taskIds)) {
-    return res.status(400).json({ error: 'action and taskIds[] are required' });
-  }
   const invalidBatchId = taskIds.find(id => !isValidUUID(id));
   if (invalidBatchId) {
     return res.status(400).json({ error: `Invalid task ID format: ${invalidBatchId}` });
-  }
-  if (!['plan', 'execute', 'dismiss'].includes(action)) {
-    return res.status(400).json({ error: 'action must be plan, execute, or dismiss' });
   }
   if (taskIds.length === 0) {
     return res.json({ message: `Batch ${action}: nothing to do`, count: 0 });

@@ -33,3 +33,52 @@ export function validateEnum(value, fieldName, allowed) {
   }
   return null;
 }
+
+/**
+ * Express middleware factory that validates req.body against a schema object.
+ * Schema keys map field names to rules: { type, required, enum, max, min, maxLength }.
+ * Returns 400 on first validation failure, or calls next().
+ */
+export function validateBody(schema) {
+  return (req, res, next) => {
+    const body = req.body || {};
+    for (const [field, rules] of Object.entries(schema)) {
+      const value = body[field];
+
+      if (rules.required && (value === undefined || value === null || value === '')) {
+        return res.status(400).json({ error: `${field} is required` });
+      }
+
+      if (value === undefined || value === null) continue;
+
+      if (rules.type) {
+        if (rules.type === 'array') {
+          if (!Array.isArray(value)) {
+            return res.status(400).json({ error: `${field} must be an array` });
+          }
+        } else if (typeof value !== rules.type) {
+          return res.status(400).json({ error: `${field} must be a ${rules.type}` });
+        }
+        if (rules.type === 'number' && isNaN(value)) {
+          return res.status(400).json({ error: `${field} must be a valid number` });
+        }
+      }
+
+      if (rules.enum && !rules.enum.includes(value)) {
+        return res.status(400).json({ error: `${field} must be one of: ${rules.enum.join(', ')}` });
+      }
+
+      if (rules.maxLength && typeof value === 'string' && value.length > rules.maxLength) {
+        return res.status(400).json({ error: `${field} must be ${rules.maxLength} characters or fewer` });
+      }
+
+      if (rules.min !== undefined && typeof value === 'number' && value < rules.min) {
+        return res.status(400).json({ error: `${field} must be at least ${rules.min}` });
+      }
+      if (rules.max !== undefined && typeof value === 'number' && value > rules.max) {
+        return res.status(400).json({ error: `${field} must be at most ${rules.max}` });
+      }
+    }
+    next();
+  };
+}

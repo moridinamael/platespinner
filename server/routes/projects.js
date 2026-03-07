@@ -9,7 +9,7 @@ import { MODELS } from '../models.js';
 import { emitNotification } from '../notifications.js';
 import { renderPRBody } from '../prUtils.js';
 import { trackPR, untrackPR, fetchPRStatus } from '../prStatus.js';
-import { isValidUUID, validateStringField } from '../validation.js';
+import { isValidUUID, validateStringField, validateBody } from '../validation.js';
 
 const RAILWAY_BIN = process.env.RAILWAY_BIN || 'railway';
 
@@ -53,6 +53,9 @@ router.param('id', (req, res, next, value) => {
   if (!isValidUUID(value)) {
     return res.status(400).json({ error: 'Invalid project ID format: expected a UUID' });
   }
+  const project = state.getProject(value);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  req.project = project;
   next();
 });
 
@@ -60,6 +63,9 @@ router.param('projectId', (req, res, next, value) => {
   if (!isValidUUID(value)) {
     return res.status(400).json({ error: 'Invalid project ID format: expected a UUID' });
   }
+  const project = state.getProject(value);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  req.project = project;
   next();
 });
 
@@ -67,6 +73,9 @@ router.param('taskId', (req, res, next, value) => {
   if (!isValidUUID(value)) {
     return res.status(400).json({ error: 'Invalid task ID format: expected a UUID' });
   }
+  const task = state.getTask(value);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  req.task = task;
   next();
 });
 
@@ -74,14 +83,11 @@ router.get('/projects', (req, res) => {
   res.json(state.getProjects());
 });
 
-router.post('/projects', (req, res) => {
-  const { name, path } = req.body;
-  const nameErr = validateStringField(name, 'name', { maxLength: 200 });
-  if (nameErr) return res.status(400).json({ error: nameErr });
-  const pathErr = validateStringField(path, 'path', { maxLength: 500, required: true });
-  if (pathErr) return res.status(400).json({ error: pathErr });
-
-  const project = state.addProject({ name, path: toWSLPath(path) });
+router.post('/projects', validateBody({
+  name: { type: 'string', maxLength: 200 },
+  path: { type: 'string', required: true, maxLength: 500 },
+}), (req, res) => {
+  const project = state.addProject({ name: req.body.name, path: toWSLPath(req.body.path) });
   broadcast('project:created', project);
   res.status(201).json(project);
 });
@@ -105,9 +111,7 @@ router.patch('/projects/reorder', (req, res) => {
 });
 
 router.patch('/projects/:id', (req, res) => {
-  const project = state.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-
+  const project = req.project;
   const updates = {};
   if ('url' in req.body && req.body.url) {
     const err = validateStringField(req.body.url, 'url', { maxLength: 2000 });
@@ -152,9 +156,6 @@ router.patch('/projects/:id', (req, res) => {
 });
 
 router.delete('/projects/:id', (req, res) => {
-  const project = state.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-
   state.removeProject(req.params.id);
   broadcast('project:removed', { id: req.params.id });
   res.status(204).end();
@@ -162,9 +163,7 @@ router.delete('/projects/:id', (req, res) => {
 
 // Git push for a project
 router.post('/projects/:id/push', (req, res) => {
-  const project = state.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-
+  const project = req.project;
   const cwd = toWSLPath(project.path);
 
   execFile('git', ['push'], { cwd }, (err, stdout, stderr) => {
@@ -193,9 +192,7 @@ router.post('/projects/:id/push', (req, res) => {
 
 // Git status for a project
 router.get('/projects/:id/git-status', (req, res) => {
-  const project = state.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-
+  const project = req.project;
   const cwd = toWSLPath(project.path);
 
   execFile('git', ['log', '--oneline', '-5'], { cwd }, (err, logOut) => {
@@ -213,9 +210,7 @@ router.get('/projects/:id/git-status', (req, res) => {
 
 // Test info (lightweight, no execution)
 router.get('/projects/:id/test-info', (req, res) => {
-  const project = state.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-
+  const project = req.project;
   if (project.testCommand) {
     return res.json({ source: 'manual', description: `Manual: ${project.testCommand}` });
   }
@@ -230,16 +225,12 @@ router.get('/projects/:id/test-info', (req, res) => {
 
 // Cached last test result (no re-run)
 router.get('/projects/:id/last-test-result', (req, res) => {
-  const project = state.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-  res.json(project.lastTestResult || null);
+  res.json(req.project.lastTestResult || null);
 });
 
 // Run tests (async — results broadcast via WebSocket)
 router.post('/projects/:id/test', (req, res) => {
-  const project = state.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-
+  const project = req.project;
   res.status(202).json({ status: 'running' });
   broadcast('project:test-started', { projectId: project.id });
 
@@ -276,9 +267,7 @@ router.post('/projects/:id/test', (req, res) => {
 
 // Setup tests — spawn agent to create/fix test configuration
 router.post('/projects/:id/setup-tests', (req, res) => {
-  const project = state.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-
+  const project = req.project;
   if (!state.lockProject(project.id)) {
     return res.status(409).json({ error: 'Project is busy (another agent is running)' });
   }
@@ -302,9 +291,6 @@ router.post('/projects/:id/setup-tests', (req, res) => {
 
 // Create a fix-tests task from failing test output
 router.post('/projects/:id/fix-tests', (req, res) => {
-  const project = state.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-
   const { summary, output } = req.body;
   const truncatedOutput = output ? output.slice(0, 5000) : '';
   const description = `## Test Failure Summary\n${summary || 'Tests are failing.'}\n\n## Test Output\n\`\`\`\n${truncatedOutput}\n\`\`\``;
@@ -322,8 +308,7 @@ router.post('/projects/:id/fix-tests', (req, res) => {
 
 // Check Railway deployment status
 router.post('/projects/:id/check-railway', async (req, res) => {
-  const project = state.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const project = req.project;
   if (!project.railwayProject) return res.status(400).json({ error: 'No Railway project configured' });
 
   broadcast('project:railway-checking', { projectId: project.id });
@@ -367,10 +352,8 @@ router.post('/projects/:id/check-railway', async (req, res) => {
 });
 
 router.get('/projects/:id/costs', (req, res) => {
-  const project = state.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
   const summary = state.getProjectCostSummary(req.params.id);
-  summary.budgetLimitUsd = project.budgetLimitUsd;
+  summary.budgetLimitUsd = req.project.budgetLimitUsd;
   res.json(summary);
 });
 
@@ -425,11 +408,11 @@ router.get('/analytics', (req, res) => {
 });
 
 // Merge a task's feature branch back to its base branch
-router.post('/projects/:projectId/tasks/:taskId/merge', async (req, res) => {
-  const project = state.getProject(req.params.projectId);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-  const task = state.getTask(req.params.taskId);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+router.post('/projects/:projectId/tasks/:taskId/merge',
+  validateBody({ strategy: { type: 'string', enum: ['merge', 'squash'] } }),
+  async (req, res) => {
+  const project = req.project;
+  const task = req.task;
   if (!task.branch) return res.status(400).json({ error: 'Task has no feature branch' });
 
   const cwd = toWSLPath(project.path);
@@ -471,10 +454,8 @@ router.post('/projects/:projectId/tasks/:taskId/merge', async (req, res) => {
 
 // Revert a task's commit
 router.post('/projects/:projectId/tasks/:taskId/revert', async (req, res) => {
-  const project = state.getProject(req.params.projectId);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-  const task = state.getTask(req.params.taskId);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const project = req.project;
+  const task = req.task;
   if (!task.commitHash) return res.status(400).json({ error: 'Task has no commit hash' });
 
   const cwd = toWSLPath(project.path);
@@ -496,10 +477,8 @@ router.post('/projects/:projectId/tasks/:taskId/revert', async (req, res) => {
 
 // Create a PR from a task's feature branch
 router.post('/projects/:projectId/tasks/:taskId/create-pr', async (req, res) => {
-  const project = state.getProject(req.params.projectId);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-  const task = state.getTask(req.params.taskId);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const project = req.project;
+  const task = req.task;
   if (!task.branch) return res.status(400).json({ error: 'Task has no feature branch' });
 
   const cwd = toWSLPath(project.path);
@@ -571,10 +550,8 @@ router.post('/projects/:projectId/tasks/:taskId/create-pr', async (req, res) => 
 
 // Merge a PR via GitHub (respects branch protections)
 router.post('/projects/:projectId/tasks/:taskId/merge-pr', async (req, res) => {
-  const project = state.getProject(req.params.projectId);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-  const task = state.getTask(req.params.taskId);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const project = req.project;
+  const task = req.task;
   if (!task.prNumber) return res.status(400).json({ error: 'Task has no PR' });
 
   const cwd = toWSLPath(project.path);
