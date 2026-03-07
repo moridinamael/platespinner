@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getNotificationSettings, updateNotificationSettings } from '../state.js';
 import { broadcast } from '../ws.js';
 import { emitNotification, addSSEClient, removeSSEClient, sendSlackNotification, sendDiscordNotification, sendEmailNotification } from '../notifications.js';
+import { resolveAndValidate } from '../netguard.js';
 
 const router = Router();
 
@@ -16,42 +17,39 @@ router.get('/notifications/settings', (req, res) => {
 });
 
 // Update notification settings
-router.patch('/notifications/settings', (req, res) => {
+router.patch('/notifications/settings', async (req, res) => {
   const { projectId, ...updates } = req.body;
 
   // Validate generic webhook URL if provided
   if (updates.webhookUrl && updates.webhookUrl.trim()) {
     try {
-      const parsed = new URL(updates.webhookUrl.trim());
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        return res.status(400).json({ error: 'Only http/https webhook URLs are allowed' });
-      }
-    } catch {
-      return res.status(400).json({ error: 'Invalid webhook URL' });
+      await resolveAndValidate(updates.webhookUrl.trim());
+    } catch (err) {
+      return res.status(400).json({ error: `Invalid webhook URL: ${err.message}` });
     }
   }
 
   // Validate Slack webhook URL
   if (updates.slackWebhookUrl && updates.slackWebhookUrl.trim()) {
     try {
-      const parsed = new URL(updates.slackWebhookUrl.trim());
+      const { parsed } = await resolveAndValidate(updates.slackWebhookUrl.trim());
       if (parsed.protocol !== 'https:') {
         return res.status(400).json({ error: 'Slack webhook URL must be HTTPS' });
       }
-    } catch {
-      return res.status(400).json({ error: 'Invalid Slack webhook URL' });
+    } catch (err) {
+      return res.status(400).json({ error: `Invalid Slack webhook URL: ${err.message}` });
     }
   }
 
   // Validate Discord webhook URL
   if (updates.discordWebhookUrl && updates.discordWebhookUrl.trim()) {
     try {
-      const parsed = new URL(updates.discordWebhookUrl.trim());
+      const { parsed } = await resolveAndValidate(updates.discordWebhookUrl.trim());
       if (parsed.protocol !== 'https:') {
         return res.status(400).json({ error: 'Discord webhook URL must be HTTPS' });
       }
-    } catch {
-      return res.status(400).json({ error: 'Invalid Discord webhook URL' });
+    } catch (err) {
+      return res.status(400).json({ error: `Invalid Discord webhook URL: ${err.message}` });
     }
   }
 

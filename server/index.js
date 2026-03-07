@@ -2,8 +2,6 @@ import express from 'express';
 import { createServer } from 'http';
 import https from 'https';
 import http from 'http';
-import dns from 'dns';
-import net from 'net';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -20,39 +18,9 @@ import { startDigestScheduler, stopDigestScheduler } from './digest.js';
 import pluginRoutes from './routes/plugins.js';
 import { loadPlugins } from './plugins/loader.js';
 import { rehydratePRTracking } from './prStatus.js';
+import { resolveAndValidate } from './netguard.js';
 
-function isPrivateIP(ip) {
-  // Handle IPv4-mapped IPv6 (::ffff:x.x.x.x)
-  if (ip.startsWith('::ffff:')) {
-    ip = ip.slice(7);
-  }
-
-  if (net.isIPv4(ip)) {
-    const octets = ip.split('.').map(Number);
-    const [a, b] = octets;
-    if (a === 0) return true;         // 0.0.0.0/8
-    if (a === 10) return true;        // 10.0.0.0/8
-    if (a === 127) return true;       // 127.0.0.0/8
-    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
-    if (a === 192 && b === 168) return true;           // 192.168.0.0/16
-    if (a === 169 && b === 254) return true;           // 169.254.0.0/16
-    return false;
-  }
-
-  if (net.isIPv6(ip)) {
-    if (ip === '::1') return true;    // loopback
-    const groups = ip.split(':');
-    const first = groups[0].toLowerCase();
-    if (first.length > 0) {
-      const val = parseInt(first, 16);
-      if (val >= 0xfc00 && val <= 0xfdff) return true; // fc00::/7
-      if (val >= 0xfe80 && val <= 0xfebf) return true; // fe80::/10
-    }
-    return false;
-  }
-
-  return true; // Unknown format — reject to be safe
-}
+const MAX_REDIRECT_DEPTH = 5;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distPath = join(__dirname, '..', 'dist');
@@ -91,22 +59,17 @@ app.get('/api/proxy', async (req, res) => {
   const target = req.query.url;
   if (!target) return res.status(400).json({ error: 'url query param required' });
 
-  let parsed;
-  try { parsed = new URL(target); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
-
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return res.status(400).json({ error: 'Only http and https URLs are allowed' });
+  const depth = parseInt(req.query.depth, 10) || 0;
+  if (depth >= MAX_REDIRECT_DEPTH) {
+    return res.status(502).json({ error: 'Too many redirects' });
   }
 
-  let resolvedAddress;
+  let parsed, resolvedAddress;
   try {
-    const { address } = await dns.promises.lookup(parsed.hostname);
-    if (isPrivateIP(address)) {
-      return res.status(403).json({ error: 'Access to private/internal addresses is not allowed' });
-    }
-    resolvedAddress = address;
+    ({ parsed, resolvedAddress } = await resolveAndValidate(target));
   } catch (err) {
-    return res.status(400).json({ error: `Cannot resolve hostname: ${err.message}` });
+    const status = err.message.includes('private') || err.message.includes('internal') ? 403 : 400;
+    return res.status(status).json({ error: err.message });
   }
 
   const mod = parsed.protocol === 'https:' ? https : http;
@@ -115,15 +78,18 @@ app.get('/api/proxy', async (req, res) => {
     port: parsed.port,
     path: parsed.pathname + parsed.search,
     headers: { 'Accept': 'text/html,*/*', 'Host': parsed.hostname },
-    rejectUnauthorized: false,
+    rejectUnauthorized: process.env.PROXY_ALLOW_INSECURE_TLS === '1' ? false : true,
     servername: parsed.hostname,
   };
 
   const proxyReq = mod.get(options, (upstream) => {
-    // Follow redirects
+    // Follow redirects — validate target against SSRF before redirecting
     if (upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
       const redirectUrl = new URL(upstream.headers.location, target).href;
-      return res.redirect(`/api/proxy?url=${encodeURIComponent(redirectUrl)}`);
+      resolveAndValidate(redirectUrl)
+        .then(() => res.redirect(`/api/proxy?url=${encodeURIComponent(redirectUrl)}&depth=${depth + 1}`))
+        .catch(() => res.status(403).json({ error: 'Redirect target is not allowed' }));
+      return;
     }
 
     const ct = upstream.headers['content-type'] || '';
