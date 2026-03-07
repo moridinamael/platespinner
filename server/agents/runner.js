@@ -2,7 +2,7 @@ import { spawn, execFile, execFileSync } from 'child_process';
 import { createWriteStream, mkdirSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { broadcast } from '../ws.js';
+import { broadcast, broadcastThrottled } from '../ws.js';
 import { buildGenerationCommand, buildExecutionCommand, buildTestSetupCommand } from './cli.js';
 import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, buildTestSetupPrompt, buildJudgmentPrompt, getBuiltInTemplates } from './prompts.js';
 import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput, parseJudgmentOutput, extractClaudeJsonOutput, estimateTokensFromText } from './parser.js';
@@ -302,7 +302,7 @@ export async function runGeneration(project, templateId, modelId, promptContent)
     const { promise } = spawnAgent(
       cmd, args, project.path,
       useStdin ? prompt : null,
-      (bytes) => { broadcast('generation:progress', { projectId: project.id, bytesReceived: bytes }); },
+      (bytes) => { broadcastThrottled('generation:progress', { projectId: project.id, bytesReceived: bytes }, 200, `generation:progress:${project.id}`); },
       null
     );
     const stdout = await promise;
@@ -422,12 +422,25 @@ export async function runPlanning(task, modelId) {
 
   const { stream: logStream } = createLogStream(task.id, 'planning');
 
+  let planLogBuffer = '';
+  let planLogTimer = null;
+  const flushPlanLog = () => {
+    planLogTimer = null;
+    if (planLogBuffer) {
+      broadcast('log:chunk', { taskId: task.id, phase: 'planning', chunk: planLogBuffer });
+      planLogBuffer = '';
+    }
+  };
+
   const { proc, promise } = spawnAgent(
     cmd, args, project.path,
     useStdin ? prompt : null,
     (bytes, textChunk) => {
-      broadcast('planning:progress', { taskId: task.id, bytesReceived: bytes });
-      if (textChunk) broadcast('log:chunk', { taskId: task.id, phase: 'planning', chunk: textChunk });
+      broadcastThrottled('planning:progress', { taskId: task.id, bytesReceived: bytes }, 200, `planning:progress:${task.id}`);
+      if (textChunk) {
+        planLogBuffer += textChunk;
+        if (!planLogTimer) planLogTimer = setTimeout(flushPlanLog, 200);
+      }
     },
     logStream
   );
@@ -493,6 +506,7 @@ export async function runPlanning(task, modelId) {
     }
     throw err;
   } finally {
+    if (planLogTimer) { clearTimeout(planLogTimer); flushPlanLog(); }
     logStream.end();
     compressReplayLog(task.id, 'planning').catch(() => {});
     state.removeProcess(task.id);
@@ -590,12 +604,25 @@ export async function runExecution(task, modelId, options = {}) {
   const stopPolling = pollGitStatus(cwd, task.id);
   const { stream: logStream } = createLogStream(task.id, 'execution');
 
+  let execLogBuffer = '';
+  let execLogTimer = null;
+  const flushExecLog = () => {
+    execLogTimer = null;
+    if (execLogBuffer) {
+      broadcast('log:chunk', { taskId: task.id, phase: 'execution', chunk: execLogBuffer });
+      execLogBuffer = '';
+    }
+  };
+
   const { proc, promise } = spawnAgent(
     cmd, args, project.path,
     useStdin ? prompt : null,
     (bytes, textChunk) => {
-      broadcast('execution:progress', { taskId: task.id, bytesReceived: bytes });
-      if (textChunk) broadcast('log:chunk', { taskId: task.id, phase: 'execution', chunk: textChunk });
+      broadcastThrottled('execution:progress', { taskId: task.id, bytesReceived: bytes }, 200, `execution:progress:${task.id}`);
+      if (textChunk) {
+        execLogBuffer += textChunk;
+        if (!execLogTimer) execLogTimer = setTimeout(flushExecLog, 200);
+      }
     },
     logStream
   );
@@ -862,6 +889,7 @@ export async function runExecution(task, modelId, options = {}) {
     });
     if (!aborted) throw err;
   } finally {
+    if (execLogTimer) { clearTimeout(execLogTimer); flushExecLog(); }
     logStream.end();
     compressReplayLog(task.id, 'execution').catch(() => {});
     // Checkout back to base branch if we created a per-task branch
@@ -933,12 +961,25 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
   const stopPolling = pollGitStatus(wtCwd, task.id);
   const { stream: wtLogStream } = createLogStream(task.id, 'execution');
 
+  let wtLogBuffer = '';
+  let wtLogBufTimer = null;
+  const flushWtLog = () => {
+    wtLogBufTimer = null;
+    if (wtLogBuffer) {
+      broadcast('log:chunk', { taskId: task.id, phase: 'execution', chunk: wtLogBuffer });
+      wtLogBuffer = '';
+    }
+  };
+
   const { proc, promise } = spawnAgent(
     cmd, args, worktreeCwd,
     useStdin ? prompt : null,
     (bytes, textChunk) => {
-      broadcast('execution:progress', { taskId: task.id, bytesReceived: bytes });
-      if (textChunk) broadcast('log:chunk', { taskId: task.id, phase: 'execution', chunk: textChunk });
+      broadcastThrottled('execution:progress', { taskId: task.id, bytesReceived: bytes }, 200, `execution:progress:${task.id}`);
+      if (textChunk) {
+        wtLogBuffer += textChunk;
+        if (!wtLogBufTimer) wtLogBufTimer = setTimeout(flushWtLog, 200);
+      }
     },
     wtLogStream
   );
@@ -1040,6 +1081,7 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     emitPluginEvent('execution:failed', { taskId: task.id, error: agentLog, aborted: false });
     throw err;
   } finally {
+    if (wtLogBufTimer) { clearTimeout(wtLogBufTimer); flushWtLog(); }
     wtLogStream.end();
     compressReplayLog(task.id, 'execution').catch(() => {});
     state.removeProcess(task.id);
@@ -1072,7 +1114,7 @@ export async function runTestSetup(project, testInfo, options = {}) {
     const { promise } = spawnAgent(
       cmd, args, project.path,
       useStdin ? prompt : null,
-      (bytes) => { broadcast('setup-tests:progress', { projectId: project.id, bytesReceived: bytes }); },
+      (bytes) => { broadcastThrottled('setup-tests:progress', { projectId: project.id, bytesReceived: bytes }, 200, `setup-tests:progress:${project.id}`); },
       null
     );
     const stdout = await promise;
