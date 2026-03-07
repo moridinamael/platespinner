@@ -38,6 +38,8 @@
   --sidebar-width: 280px;
   --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.25);
 }
 
 [data-theme='dark'] {
@@ -66,6 +68,8 @@
   --shadow-popup: 0 4px 12px rgba(0,0,0,0.4);
   --shadow-overlay: 0 8px 24px rgba(0,0,0,0.4);
   --border-subtle: 1px solid rgba(255,255,255,0.05);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.25);
 }
 
 [data-theme='light'] {
@@ -94,6 +98,8 @@
   --shadow-popup: 0 4px 12px rgba(0,0,0,0.12);
   --shadow-overlay: 0 8px 24px rgba(0,0,0,0.12);
   --border-subtle: 1px solid rgba(0,0,0,0.06);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
 }
 
 @media (prefers-color-scheme: light) {
@@ -123,6 +129,8 @@
     --shadow-popup: 0 4px 12px rgba(0,0,0,0.12);
     --shadow-overlay: 0 8px 24px rgba(0,0,0,0.12);
     --border-subtle: 1px solid rgba(0,0,0,0.06);
+    --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+    --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
   }
 }
 
@@ -2154,8 +2162,17 @@ html, body {
 }
 
 /* ===== Scrollbar ===== */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* Webkit (Chrome, Safari, Edge) */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -2163,12 +2180,30 @@ html, body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--surface-3);
-  border-radius: 3px;
+  background: var(--scrollbar-thumb);
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-dim);
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* Expand scrollbar on container hover */
+.column-body:hover::-webkit-scrollbar,
+.project-list-scroll:hover::-webkit-scrollbar,
+.sidebar-bottom:hover::-webkit-scrollbar,
+.modal:hover::-webkit-scrollbar,
+.modal-plan:hover::-webkit-scrollbar,
+.modal-log:hover::-webkit-scrollbar,
+.modal-timeline-section:hover::-webkit-scrollbar,
+.command-palette-results:hover::-webkit-scrollbar,
+.git-files:hover::-webkit-scrollbar,
+.recent-commits:hover::-webkit-scrollbar,
+.test-output pre:hover::-webkit-scrollbar,
+.diff-container:hover::-webkit-scrollbar,
+.autoclicker-log-entries:hover::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
 /* ===== Autoclicker Mode ===== */
