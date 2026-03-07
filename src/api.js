@@ -6,6 +6,8 @@ async function request(method, path, body, { signal } = {}) {
     method,
     headers: { 'Content-Type': 'application/json' },
   };
+  const token = window.__APP_API_TOKEN__;
+  if (token) opts.headers['Authorization'] = `Bearer ${token}`;
   if (body) opts.body = JSON.stringify(body);
   if (signal) opts.signal = signal;
   const res = await fetch(`${BASE}${path}`, opts);
@@ -71,7 +73,10 @@ export const api = {
   getPluginCapabilities: () => request('GET', '/plugins/capabilities'),
   getTaskLogMeta: (taskId) => request('GET', `/tasks/${taskId}/logs`),
   getTaskLog: async (taskId, phase) => {
-    const res = await fetch(`${BASE}/tasks/${taskId}/logs/${phase}`);
+    const headers = {};
+    const token = window.__APP_API_TOKEN__;
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${BASE}/tasks/${taskId}/logs/${phase}`, { headers });
     if (!res.ok) throw new Error('Log not found');
     const text = await res.text();
     const size = parseInt(res.headers.get('X-Log-Size') || '0', 10);
@@ -108,7 +113,9 @@ export class WebSocketManager {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    let wsUrl = `${protocol}//${window.location.host}/ws`;
+    const token = window.__APP_API_TOKEN__;
+    if (token) wsUrl += `?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {

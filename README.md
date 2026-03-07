@@ -59,6 +59,8 @@ npm install
 npm start
 ```
 
+The server binds to `localhost` by default. To expose it on the network (e.g., access from another machine), set `HOST=0.0.0.0` and configure `APP_API_TOKEN` for security.
+
 Open [http://localhost:3001](http://localhost:3001), click **Add Project**, and point it at a local codebase directory.
 
 ## Development
@@ -84,7 +86,9 @@ Copy `.env.example` to `.env` and adjust as needed:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `HOST` | `127.0.0.1` | Bind address. Use `0.0.0.0` to expose on all interfaces |
 | `PORT` | `3001` | Server port |
+| `APP_API_TOKEN` | *(none)* | Bearer token required for mutating API requests. Recommended when `HOST` is not localhost |
 | `RAILWAY_BIN` | `railway` | Path to Railway CLI binary |
 | `DEBUG_AUTOCLICKER` | off | Enable debug logging for autoclicker judgment agent |
 

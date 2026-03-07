@@ -3,7 +3,18 @@ import { WebSocketServer } from 'ws';
 let wss;
 
 export function setupWebSocket(server) {
-  wss = new WebSocketServer({ server });
+  const apiToken = process.env.APP_API_TOKEN;
+  wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    verifyClient: apiToken
+      ? ({ req }, done) => {
+          const url = new URL(req.url, 'http://localhost');
+          const token = url.searchParams.get('token');
+          done(token === apiToken);
+        }
+      : undefined,
+  });
 
   wss.on('connection', (ws) => {
     ws.isAlive = true;

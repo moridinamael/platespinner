@@ -4,6 +4,7 @@ import https from 'https';
 import http from 'http';
 import dns from 'dns';
 import net from 'net';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { setupWebSocket } from './ws.js';
@@ -59,6 +60,21 @@ const app = express();
 const server = createServer(app);
 
 app.use(express.json());
+
+// Optional token auth for mutating API routes
+const API_TOKEN = process.env.APP_API_TOKEN;
+if (API_TOKEN) {
+  app.use('/api', (req, res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+      return next();
+    }
+    const auth = req.headers.authorization;
+    if (auth === `Bearer ${API_TOKEN}`) {
+      return next();
+    }
+    res.status(401).json({ error: 'Invalid or missing API token' });
+  });
+}
 
 // API routes
 app.use('/api', projectRoutes);
@@ -139,7 +155,20 @@ app.get('/api/proxy', async (req, res) => {
 // Serve built frontend
 app.use(express.static(distPath));
 app.get('*', (req, res) => {
-  res.sendFile(join(distPath, 'index.html'));
+  if (API_TOKEN) {
+    try {
+      let html = readFileSync(join(distPath, 'index.html'), 'utf-8');
+      html = html.replace(
+        '<head>',
+        `<head><script>window.__APP_API_TOKEN__=${JSON.stringify(API_TOKEN)}</script>`
+      );
+      res.type('html').send(html);
+    } catch {
+      res.sendFile(join(distPath, 'index.html'));
+    }
+  } else {
+    res.sendFile(join(distPath, 'index.html'));
+  }
 });
 
 // WebSocket
@@ -163,6 +192,7 @@ setInterval(async () => {
 }, 90_000);
 
 const PORT = process.env.PORT || 3001;
+const HOST = process.env.HOST || '127.0.0.1';
 
 // Load plugins before starting server
 const pluginResult = await loadPlugins();
@@ -173,9 +203,15 @@ if (pluginResult.errors.length > 0) {
   console.warn(`${pluginResult.errors.length} plugin(s) failed to load`);
 }
 
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`WebSocket available on ws://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Server running on http://${HOST}:${PORT}`);
+  console.log(`WebSocket available on ws://${HOST}:${PORT}`);
+  if (HOST === '127.0.0.1' || HOST === 'localhost') {
+    console.log('Listening on localhost only. Set HOST=0.0.0.0 to expose on all interfaces.');
+  }
+  if (HOST !== '127.0.0.1' && HOST !== 'localhost' && HOST !== '::1' && !API_TOKEN) {
+    console.warn('\u26a0 Server is exposed on the network without APP_API_TOKEN. Set APP_API_TOKEN to require auth for mutating requests.');
+  }
   startDigestScheduler();
 });
 
