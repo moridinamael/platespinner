@@ -4,7 +4,7 @@ import { createReadStream, statSync } from 'fs';
 import { join } from 'path';
 import * as state from '../state.js';
 import { LOGS_DIR } from '../state.js';
-import { broadcast, broadcastThrottled } from '../ws.js';
+import { broadcast } from '../ws.js';
 import { toWSLPath } from '../paths.js';
 import { runGeneration, runExecution, runPlanning, spawnAgent, extractCostData } from '../agents/runner.js';
 import { readReplayLog, getReplayMeta } from '../agents/replay.js';
@@ -478,7 +478,7 @@ router.post('/tasks/:id/replay/:phase', async (req, res) => {
     const { promise } = spawnAgent(
       cmd, args, project.path,
       useStdin ? promptEvent.prompt : null,
-      (bytes) => { broadcastThrottled('replay:progress', { taskId: task.id, phase, bytesReceived: bytes }, 200, `replay:progress:${task.id}`); },
+      (bytes) => { broadcast('replay:progress', { taskId: task.id, phase, bytesReceived: bytes }); },
       null
     );
     const stdout = await promise;

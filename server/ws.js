@@ -50,36 +50,3 @@ export function broadcast(event, data) {
     }
   });
 }
-
-const throttleState = new Map(); // key → { timer, latestEvent, latestData }
-
-export function broadcastThrottled(event, data, intervalMs, key) {
-  const k = key || event;
-  const entry = throttleState.get(k);
-  if (!entry) {
-    // First call — send immediately and start cooldown
-    broadcast(event, data);
-    throttleState.set(k, {
-      timer: setTimeout(() => {
-        const e = throttleState.get(k);
-        if (e && e.latestData !== null) {
-          broadcast(e.latestEvent, e.latestData);
-        }
-        throttleState.delete(k);
-      }, intervalMs),
-      latestEvent: event,
-      latestData: null,
-    });
-  } else {
-    // Within cooldown — coalesce (keep latest)
-    entry.latestEvent = event;
-    entry.latestData = data;
-  }
-}
-
-export function clearThrottles() {
-  for (const [, entry] of throttleState) {
-    clearTimeout(entry.timer);
-  }
-  throttleState.clear();
-}
