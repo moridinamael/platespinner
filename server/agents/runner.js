@@ -100,33 +100,54 @@ function advanceQueue(projectId) {
   broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
 }
 
-const GIT_POLL_MS = 10_000; // poll git status every 10s
+const GIT_POLL_MS = 30_000; // poll git status every 30s
 
 function pollGitStatus(cwd, taskId) {
-  const interval = setInterval(() => {
-    // Get short diff stat
-    execFile('git', ['diff', '--stat', 'HEAD'], { cwd }, (err, stdout) => {
-      if (err) return;
-      const lines = stdout.trim().split('\n').filter(Boolean);
-      if (lines.length === 0) return;
-      // Last line is summary like " 3 files changed, 45 insertions(+), 12 deletions(-)"
-      const summary = lines[lines.length - 1].trim();
-      // Individual file changes
-      const files = lines.slice(0, -1).map((l) => l.trim()).filter(Boolean);
-      broadcast('execution:git', { taskId, summary, files });
-    });
+  const SEP = '---GIT_POLL_SEP---';
+  let lastOutput = '';
+  let intervalId = null;
 
-    // Also check for new untracked files
-    execFile('git', ['ls-files', '--others', '--exclude-standard'], { cwd }, (err, stdout) => {
-      if (err || !stdout.trim()) return;
-      const untracked = stdout.trim().split('\n').filter(Boolean);
-      if (untracked.length > 0) {
-        broadcast('execution:git-untracked', { taskId, files: untracked });
+  const poll = () => {
+    execFile(
+      'bash',
+      ['-c', `git diff --stat HEAD 2>/dev/null; echo '${SEP}'; git ls-files --others --exclude-standard 2>/dev/null`],
+      { cwd },
+      (err, stdout) => {
+        if (err) return;
+        if (stdout === lastOutput) return;
+        lastOutput = stdout;
+
+        const [diffPart, untrackedPart] = stdout.split(SEP);
+
+        if (diffPart) {
+          const lines = diffPart.trim().split('\n').filter(Boolean);
+          if (lines.length > 0) {
+            const summary = lines[lines.length - 1].trim();
+            const files = lines.slice(0, -1).map((l) => l.trim()).filter(Boolean);
+            broadcast('execution:git', { taskId, summary, files });
+          }
+        }
+
+        if (untrackedPart) {
+          const untracked = untrackedPart.trim().split('\n').filter(Boolean);
+          if (untracked.length > 0) {
+            broadcast('execution:git-untracked', { taskId, files: untracked });
+          }
+        }
       }
-    });
-  }, GIT_POLL_MS);
+    );
+  };
 
-  return () => clearInterval(interval);
+  // Stagger start with random jitter so concurrent tasks don't all poll simultaneously
+  const startTimer = setTimeout(() => {
+    poll();
+    intervalId = setInterval(poll, GIT_POLL_MS);
+  }, Math.floor(Math.random() * GIT_POLL_MS));
+
+  return () => {
+    clearTimeout(startTimer);
+    if (intervalId !== null) clearInterval(intervalId);
+  };
 }
 
 // Get full login-shell PATH (includes ~/.bashrc, Windows PATH in WSL, etc.)
