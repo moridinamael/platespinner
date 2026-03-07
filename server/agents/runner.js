@@ -377,7 +377,7 @@ export async function runPlanning(task, modelId) {
     },
     logStream
   );
-  state.setProcess(task.id, proc);
+  state.setProcess(task.id, { proc, phase: 'planning' });
 
   try {
     const stdout = await promise;
@@ -529,7 +529,7 @@ export async function runExecution(task, modelId) {
     logStream
   );
 
-  state.setProcess(task.id, { proc, stopPolling });
+  state.setProcess(task.id, { proc, stopPolling, phase: 'executing' });
 
   try {
     const stdout = await promise;
@@ -754,7 +754,7 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     wtLogStream
   );
 
-  state.setProcess(task.id, { proc, stopPolling });
+  state.setProcess(task.id, { proc, stopPolling, phase: 'executing' });
 
   try {
     const stdout = await promise;

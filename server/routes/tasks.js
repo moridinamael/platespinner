@@ -194,6 +194,8 @@ router.post('/tasks/:id/abort', (req, res) => {
   }
 
   state.markAborted(task.id);
+  // Stop git polling immediately on abort
+  if (handle.stopPolling) handle.stopPolling();
 
   try {
     handle.proc.kill('SIGTERM');
@@ -217,10 +219,11 @@ router.post('/tasks/:id/dismiss', (req, res) => {
   const task = state.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
 
-  // Kill running agent subprocess if task is mid-planning
-  const proc = state.getProcess(req.params.id);
-  if (proc) {
-    proc.kill('SIGTERM');
+  // Kill running agent subprocess if task is mid-planning or mid-execution
+  const handle = state.getProcess(req.params.id);
+  if (handle) {
+    try { handle.proc.kill('SIGTERM'); } catch { /* already dead */ }
+    if (handle.stopPolling) handle.stopPolling();
     state.removeProcess(req.params.id);
   }
 
@@ -471,8 +474,8 @@ router.post('/tasks/batch', async (req, res) => {
 
       const handle = state.getProcess(id);
       if (handle) {
-        const proc = handle.proc || handle;
-        try { proc.kill('SIGTERM'); } catch { /* already dead */ }
+        try { handle.proc.kill('SIGTERM'); } catch { /* already dead */ }
+        if (handle.stopPolling) handle.stopPolling();
         state.removeProcess(id);
       }
 
@@ -499,11 +502,11 @@ router.post('/tasks/stop-all', async (req, res) => {
     if (!handle) continue;
 
     state.markAborted(taskId);
-    const proc = handle.proc || handle;
-    try { proc.kill('SIGTERM'); } catch { /* already dead */ }
+    if (handle.stopPolling) handle.stopPolling();
+    try { handle.proc.kill('SIGTERM'); } catch { /* already dead */ }
     // SIGKILL fallback
     setTimeout(() => {
-      try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+      try { handle.proc.kill('SIGKILL'); } catch { /* already dead */ }
     }, 5000);
     aborted++;
   }

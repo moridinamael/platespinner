@@ -13,7 +13,7 @@ const projects = new Map();
 const tasks = new Map();
 const promptTemplates = new Map();
 const notificationSettings = new Map(); // projectId|'global' → settings
-const runningProcesses = new Map(); // taskId → ChildProcess
+const runningProcesses = new Map(); // taskId → { proc: ChildProcess, stopPolling: Function|null, phase: string|null }
 const projectLocks = new Set();     // projectIds currently executing
 const executionQueues = new Map();  // projectId → taskId[]
 
@@ -339,8 +339,17 @@ export function removePromptTemplate(id) {
   return result;
 }
 
-export function setProcess(taskId, proc) {
-  runningProcesses.set(taskId, proc);
+export function setProcess(taskId, handle) {
+  // Normalize: if a bare ChildProcess is passed, wrap it
+  if (handle && typeof handle.kill === 'function') {
+    runningProcesses.set(taskId, { proc: handle, stopPolling: null, phase: null });
+  } else {
+    runningProcesses.set(taskId, {
+      proc: handle.proc,
+      stopPolling: handle.stopPolling || null,
+      phase: handle.phase || null,
+    });
+  }
 }
 
 export function getProcess(taskId) {
