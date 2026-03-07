@@ -80,6 +80,15 @@ export function formatCost(costUsd) {
   return `$${costUsd.toFixed(2)}`;
 }
 
+export function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export function formatTokens(count) {
   if (!count) return '0';
   if (count < 1000) return String(count);

@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useMemo, memo } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { api } from '../api.js';
-import { getModelLabel, getModelProvider, formatCost, formatTokens, formatLogSize } from '../utils.js';
+import { getModelLabel, getModelProvider, formatCost, formatTokens, formatLogSize, escapeHtml } from '../utils.js';
 import DiffViewer from './DiffViewer.jsx';
 import AnsiToHtml from 'ansi-to-html';
 
-const ansiConverter = new AnsiToHtml({ fg: '#959ab0', bg: 'transparent', newline: true });
+const ansiConverter = new AnsiToHtml({ fg: '#959ab0', bg: 'transparent', newline: true, escapeXML: true });
 
 function formatEventType(type) {
   switch (type) {
@@ -174,7 +174,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
     try {
       return ansiConverter.toHtml(text);
     } catch {
-      return text;
+      return escapeHtml(text);
     }
   }, [displayedLog]);
 
