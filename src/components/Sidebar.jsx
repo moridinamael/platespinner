@@ -119,6 +119,8 @@ function Sidebar({
   tasks,
   theme,
   onToggleTheme,
+  authRequired,
+  onLogout,
 }) {
   const [path, setPath] = useState('');
   const [pushing, setPushing] = useState(null);
@@ -375,6 +377,11 @@ function Sidebar({
         >
           {theme === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19'}
         </button>
+        {authRequired && (
+          <button className="theme-toggle" onClick={onLogout} title="Log out">
+            \uD83D\uDD12
+          </button>
+        )}
       </div>
 
       <button

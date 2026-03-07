@@ -12,6 +12,7 @@ import CommandPalette from './components/CommandPalette.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import AnalyticsDashboard from './components/AnalyticsDashboard.jsx';
 import SkillEditor from './components/SkillEditor.jsx';
+import LoginScreen from './components/LoginScreen.jsx';
 import { matchesFilters } from './utils.js';
 
 export default function App() {
@@ -45,6 +46,10 @@ export default function App() {
       return next;
     });
   }, []);
+
+  // Auth state: null = checking, 'ok' = authenticated/no auth needed, 'login' = show login
+  const [authState, setAuthState] = useState(null);
+  const [authRequired, setAuthRequired] = useState(false);
 
   const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -96,6 +101,13 @@ export default function App() {
   );
 
   const [models, setModels] = useState([]);
+
+  useEffect(() => {
+    api.authStatus().then(({ required, authenticated }) => {
+      setAuthRequired(required);
+      setAuthState(!required || authenticated ? 'ok' : 'login');
+    }).catch(() => setAuthState('ok'));
+  }, []);
 
   // Load initial data
   useEffect(() => {
@@ -1241,6 +1253,11 @@ export default function App() {
 
   const hasPreview = selectedProject?.url;
 
+  if (authState === null) return null;
+  if (authState === 'login') {
+    return <LoginScreen onSuccess={() => setAuthState('ok')} />;
+  }
+
   return (
     <div className="app">
       <ErrorBoundary name="Sidebar" className="error-boundary-sidebar">
@@ -1269,6 +1286,8 @@ export default function App() {
           tasks={tasks}
           theme={theme}
           onToggleTheme={toggleTheme}
+          authRequired={authRequired}
+          onLogout={async () => { await api.logout(); setAuthState('login'); }}
         />
       </ErrorBoundary>
       <main className="main">

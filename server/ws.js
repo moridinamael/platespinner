@@ -9,9 +9,15 @@ export function setupWebSocket(server) {
     path: '/ws',
     verifyClient: apiToken
       ? ({ req }, done) => {
+          // Check query param (for API/CLI consumers)
           const url = new URL(req.url, 'http://localhost');
-          const token = url.searchParams.get('token');
-          done(token === apiToken);
+          const qToken = url.searchParams.get('token');
+          if (qToken === apiToken) return done(true);
+          // Check HttpOnly cookie (for browser sessions)
+          const cookieHeader = req.headers.cookie || '';
+          const match = cookieHeader.split(';').find(c => c.trim().startsWith('platespinner_auth='));
+          const cToken = match ? decodeURIComponent(match.split('=')[1].trim()) : null;
+          done(cToken === apiToken);
         }
       : undefined,
   });
