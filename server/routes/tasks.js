@@ -189,7 +189,7 @@ router.post('/tasks/:id/execute', async (req, res) => {
     }
   }
 
-  if (state.isProjectLocked(task.projectId)) {
+  if (!state.lockProject(task.projectId)) {
     // Project is busy — enqueue instead of rejecting
     state.updateTask(task.id, { status: 'queued', executedBy: modelId || null });
     const position = state.enqueueTask(task.projectId, task.id);
@@ -198,11 +198,11 @@ router.post('/tasks/:id/execute', async (req, res) => {
     return res.json({ message: 'Queued for execution', taskId: task.id, position });
   }
 
-  // Fire and forget — results come via WebSocket
+  // Lock acquired — fire and forget, results come via WebSocket
   res.json({ message: 'Execution started', taskId: task.id });
 
   try {
-    await runExecution(task, modelId);
+    await runExecution(task, modelId, { lockHeld: true });
   } catch (err) {
     console.error('Execution failed:', err.message);
   }
@@ -585,7 +585,7 @@ router.post('/tasks/batch', async (req, res) => {
         if (totalSpent >= project.budgetLimitUsd) continue; // skip over-budget tasks
       }
 
-      if (state.isProjectLocked(task.projectId)) {
+      if (!state.lockProject(task.projectId)) {
         state.updateTask(task.id, { status: 'queued', executedBy: modelId || null });
         const position = state.enqueueTask(task.projectId, task.id);
         broadcast('execution:queued', { taskId: task.id, position, projectId: task.projectId });
@@ -593,8 +593,8 @@ router.post('/tasks/batch', async (req, res) => {
         queued++;
       } else {
         started++;
-        // Fire and forget
-        runExecution(task, modelId).catch(err => console.error('Batch execute failed:', err.message));
+        // Fire and forget — lock already held
+        runExecution(task, modelId, { lockHeld: true }).catch(err => console.error('Batch execute failed:', err.message));
       }
     }
 

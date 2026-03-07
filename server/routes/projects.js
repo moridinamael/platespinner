@@ -239,7 +239,7 @@ router.post('/projects/:id/setup-tests', (req, res) => {
   const project = state.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
-  if (state.isProjectLocked(project.id)) {
+  if (!state.lockProject(project.id)) {
     return res.status(409).json({ error: 'Project is busy (another agent is running)' });
   }
 
@@ -252,10 +252,10 @@ router.post('/projects/:id/setup-tests', (req, res) => {
     if (detected) testInfo = { source: 'auto', description: `Auto-detected: ${detected.description}` };
   }
 
-  // Fire and forget — results come via WebSocket
+  // Fire and forget — lock already held, results come via WebSocket
   res.json({ message: 'Test setup started' });
 
-  runTestSetup(project, testInfo).catch((err) => {
+  runTestSetup(project, testInfo, { lockHeld: true }).catch((err) => {
     console.error('Test setup failed:', err.message);
   });
 });

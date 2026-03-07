@@ -479,13 +479,15 @@ export async function runPlanning(task, modelId) {
   }
 }
 
-export async function runExecution(task, modelId) {
+export async function runExecution(task, modelId, options = {}) {
   modelId = modelId || DEFAULT_MODEL_ID;
   const project = state.getProject(task.projectId);
   if (!project) throw new Error('Project not found');
 
-  if (!state.lockProject(project.id)) {
-    throw new Error('Project is already being executed on');
+  if (!options.lockHeld) {
+    if (!state.lockProject(project.id)) {
+      throw new Error('Project is already being executed on');
+    }
   }
 
   const budget = checkBudget(project);
@@ -1027,9 +1029,11 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
 
 export { spawnAgent, extractCostData };
 
-export async function runTestSetup(project, testInfo) {
-  if (!state.lockProject(project.id)) {
-    throw new Error('Project is already being executed on');
+export async function runTestSetup(project, testInfo, options = {}) {
+  if (!options.lockHeld) {
+    if (!state.lockProject(project.id)) {
+      throw new Error('Project is already being executed on');
+    }
   }
 
   const prompt = buildTestSetupPrompt(project.path, testInfo);

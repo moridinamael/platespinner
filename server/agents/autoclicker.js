@@ -171,7 +171,7 @@ async function _runProjectCycle(project) {
           state.incrementCycleCount(project.id);
           return;
         }
-        if (state.isProjectLocked(project.id)) {
+        if (!state.lockProject(project.id)) {
           // Project already has an execution running — queue instead
           state.updateTask(task.id, { status: 'queued', executedBy: DEFAULT_MODEL_ID });
           const position = state.enqueueTask(project.id, task.id);
@@ -180,7 +180,7 @@ async function _runProjectCycle(project) {
         } else {
           projectCycleStatus.set(project.id, 'executing');
           broadcast('autoclicker:phase', { projectId: project.id, phase: 'executing' });
-          await runExecution(task, DEFAULT_MODEL_ID);
+          await runExecution(task, DEFAULT_MODEL_ID, { lockHeld: true });
         }
       }
     }
