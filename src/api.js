@@ -66,6 +66,9 @@ export const api = {
   getAutoclickerStatus: () => request('GET', '/autoclicker/status'),
   batchAction: (action, taskIds, modelId) => request('POST', '/tasks/batch', { action, taskIds, modelId }),
   stopAll: () => request('POST', '/tasks/stop-all'),
+  getSimilarTasks: (taskId) => request('GET', `/tasks/${taskId}/similar`),
+  resolveDuplicate: (taskId, action, mergeIntoTaskId) =>
+    request('POST', `/tasks/${taskId}/resolve-duplicate`, { action, mergeIntoTaskId }),
   getTaskDependencies: (id) => request('GET', `/tasks/${id}/dependencies`),
   getTaskDiff: (id) => request('GET', `/tasks/${id}/diff`),
   revertTask: (projectId, taskId) => request('POST', `/projects/${projectId}/tasks/${taskId}/revert`),

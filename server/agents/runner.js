@@ -17,6 +17,7 @@ import { writeReplayEvent, compressReplayLog } from './replay.js';
 import { runPostExecutionHooks, runPreExecutionHooks, runPostPlanningHooks, runTaskValidators, emitPluginEvent } from '../plugins/manager.js';
 import { renderPRBody } from '../prUtils.js';
 import { trackPR, fetchPRStatus } from '../prStatus.js';
+import { findSimilarTasks, extractFilePaths, findFileConflicts } from '../similarity.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
 
@@ -301,19 +302,26 @@ export async function runGeneration(project, templateId, modelId, promptContent)
     });
 
     // Dedup: skip proposals whose title matches an existing task for this project
+    const existingTasks = state.getTasks(project.id);
     const existingTitles = new Set(
-      state.getTasks(project.id).map((t) => t.title.toLowerCase().trim())
+      existingTasks.map((t) => t.title.toLowerCase().trim())
     );
 
     const costPerTask = costData.costUsd ? costData.costUsd / Math.max(proposals.length, 1) : null;
 
     const createdTasks = [];
+    const pendingReview = [];
     let skipped = 0;
     for (const proposal of proposals) {
+      // Phase 1: Exact match — auto-skip
       if (existingTitles.has(proposal.title.toLowerCase().trim())) {
         skipped++;
         continue;
       }
+
+      // Phase 2: Semantic similarity check
+      const similar = findSimilarTasks(proposal, existingTasks);
+
       const task = state.addTask({
         projectId: project.id,
         title: proposal.title,
@@ -322,20 +330,37 @@ export async function runGeneration(project, templateId, modelId, promptContent)
         effort: proposal.estimatedEffort || 'medium',
         generatedBy: modelId,
       });
+
+      if (similar.length > 0) {
+        state.updateTask(task.id, {
+          similarTasks: similar.map(s => ({ taskId: s.taskId, title: s.title, score: s.score, status: s.status })),
+        });
+        pendingReview.push({ taskId: task.id, title: task.title, similar });
+      }
+
       if (costPerTask != null) {
         state.updateTask(task.id, {
           tokenUsage: { generation: { input: costData.inputTokens, output: costData.outputTokens } },
           costUsd: costPerTask,
         });
       }
-      createdTasks.push(task);
-      broadcast('task:created', task);
+      createdTasks.push(state.getTask(task.id));
+      broadcast('task:created', state.getTask(task.id));
+    }
+
+    // Broadcast duplicate review needed
+    if (pendingReview.length > 0) {
+      broadcast('generation:duplicates-found', {
+        projectId: project.id,
+        duplicates: pendingReview,
+      });
     }
 
     broadcast('generation:completed', {
       projectId: project.id,
       taskCount: createdTasks.length,
       skippedDuplicates: skipped,
+      pendingReview: pendingReview.length,
       costUsd: costData.costUsd,
     });
     emitPluginEvent('generation:completed', { projectId: project.id, taskCount: createdTasks.length });
@@ -518,6 +543,21 @@ export async function runExecution(task, modelId) {
   state.updateTask(task.id, { status: 'executing', executedBy: modelId });
   broadcast('execution:started', { taskId: task.id });
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
+
+  // File conflict detection
+  if (task.plan) {
+    const taskFiles = extractFilePaths(task.plan);
+    if (taskFiles.length > 0) {
+      state.updateTask(task.id, { trackedFiles: taskFiles });
+      const otherExecuting = state.getTasks(project.id)
+        .filter(t => t.id !== task.id && (t.status === 'executing' || t.status === 'queued') && t.trackedFiles)
+        .map(t => ({ id: t.id, title: t.title, trackedFiles: t.trackedFiles }));
+      const conflicts = findFileConflicts(task.id, taskFiles, otherExecuting);
+      if (conflicts.length > 0) {
+        broadcast('execution:file-conflicts', { taskId: task.id, conflicts });
+      }
+    }
+  }
 
   writeReplayEvent(task.id, 'execution', {
     type: 'prompt_sent', phase: 'execution', taskId: task.id, projectId: project.id, modelId, prompt,
@@ -846,6 +886,21 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
   state.updateTask(task.id, { status: 'executing', executedBy: modelId });
   broadcast('execution:started', { taskId: task.id });
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
+
+  // File conflict detection (worktree)
+  if (task.plan) {
+    const taskFiles = extractFilePaths(task.plan);
+    if (taskFiles.length > 0) {
+      state.updateTask(task.id, { trackedFiles: taskFiles });
+      const otherExecuting = state.getTasks(project.id)
+        .filter(t => t.id !== task.id && (t.status === 'executing' || t.status === 'queued') && t.trackedFiles)
+        .map(t => ({ id: t.id, title: t.title, trackedFiles: t.trackedFiles }));
+      const conflicts = findFileConflicts(task.id, taskFiles, otherExecuting);
+      if (conflicts.length > 0) {
+        broadcast('execution:file-conflicts', { taskId: task.id, conflicts });
+      }
+    }
+  }
 
   writeReplayEvent(task.id, 'execution', {
     type: 'prompt_sent', phase: 'execution', taskId: task.id, projectId: project.id, modelId, prompt,

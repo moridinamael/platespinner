@@ -264,6 +264,8 @@ export function addTask({ projectId, title, description, rationale, effort, gene
     createdAt: Date.now(),
     sortOrder: Date.now(),
     dependencies: [],
+    similarTasks: null,
+    trackedFiles: null,
   };
   tasks.set(id, task);
   save();

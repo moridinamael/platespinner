@@ -276,6 +276,10 @@ export default function App() {
         setTimeout(() => setStatusMessage(null), 3000);
         break;
       }
+      case 'generation:duplicates-found':
+        setStatusMessage(`${data.duplicates.length} potential duplicate(s) need review`);
+        setTimeout(() => setStatusMessage(null), 5000);
+        break;
       case 'generation:failed':
         delete pendingProgressRef.current.generating[data.projectId];
         setGeneratingMap((prev) => {
@@ -387,6 +391,10 @@ export default function App() {
           }
           return t;
         }));
+        break;
+      case 'execution:file-conflicts':
+        setStatusMessage(`Warning: Task may conflict with ${data.conflicts.length} other task(s) on shared files`);
+        setTimeout(() => setStatusMessage(null), 8000);
         break;
       case 'execution:completed':
         clearProgress(data.taskId);

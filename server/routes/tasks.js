@@ -10,6 +10,7 @@ import { runGeneration, runExecution, runPlanning, spawnAgent, extractCostData }
 import { readReplayLog, getReplayMeta } from '../agents/replay.js';
 import { buildGenerationCommand } from '../agents/cli.js';
 import { emitNotification } from '../notifications.js';
+import { findSimilarTasks } from '../similarity.js';
 
 const router = Router();
 
@@ -454,6 +455,53 @@ router.post('/tasks/:id/replay/:phase', async (req, res) => {
   } catch (err) {
     broadcast('replay:failed', { taskId: task.id, phase, error: err.message });
   }
+});
+
+// --- Similarity / duplicate resolution endpoints ---
+
+router.get('/tasks/:id/similar', (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  const existingTasks = state.getTasks(task.projectId)
+    .filter(t => t.id !== task.id);
+  const similar = findSimilarTasks(task, existingTasks, 0.2);
+  res.json({ taskId: task.id, similar });
+});
+
+router.post('/tasks/:id/resolve-duplicate', (req, res) => {
+  const { action, mergeIntoTaskId } = req.body;
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  if (action === 'skip') {
+    state.removeTask(task.id);
+    broadcast('task:dismissed', { id: task.id });
+    return res.json({ message: 'Task dismissed as duplicate' });
+  }
+
+  if (action === 'merge' && mergeIntoTaskId) {
+    const target = state.getTask(mergeIntoTaskId);
+    if (!target) return res.status(404).json({ error: 'Merge target not found' });
+    const mergedDesc = target.description + '\n\n---\nMerged from: ' + task.title + '\n' + task.description;
+    const mergedRationale = target.rationale + (task.rationale ? '\n' + task.rationale : '');
+    state.updateTask(target.id, {
+      description: mergedDesc,
+      rationale: mergedRationale,
+    });
+    state.removeTask(task.id);
+    broadcast('task:updated', state.getTask(target.id));
+    broadcast('task:dismissed', { id: task.id });
+    return res.json({ message: 'Tasks merged', mergedInto: target.id });
+  }
+
+  if (action === 'keep') {
+    state.updateTask(task.id, { similarTasks: null });
+    broadcast('task:updated', state.getTask(task.id));
+    return res.json({ message: 'Task kept' });
+  }
+
+  res.status(400).json({ error: 'Invalid action. Use keep, skip, or merge' });
 });
 
 // --- Dependency info endpoint ---

@@ -3729,3 +3729,75 @@ html, body {
 .dependency-graph {
   display: block;
 }
+
+/* ===== Duplicate badge on cards ===== */
+
+.duplicate-badge {
+  background: var(--orange, #e67e22);
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: help;
+}
+
+/* ===== Related tasks in modal ===== */
+
+.modal-related-section {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.related-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.related-task-item {
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.related-task-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.related-task-title {
+  flex: 1;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.related-task-score {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.score-high {
+  background: #e74c3c;
+  color: #fff;
+}
+
+.score-medium {
+  background: var(--orange, #e67e22);
+  color: #fff;
+}
+
+.score-low {
+  background: var(--text-dim);
+  color: #fff;
+}
+
+.related-task-status {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}

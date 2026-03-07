@@ -128,6 +128,12 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
           </span>
         )}
 
+        {task.similarTasks?.length > 0 && (
+          <span className="duplicate-badge" title={`${task.similarTasks.length} potential duplicate(s)`}>
+            ~{task.similarTasks.length}
+          </span>
+        )}
+
         {project && (
           <span className="project-badge">
             {project.name}

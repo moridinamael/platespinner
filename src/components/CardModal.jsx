@@ -51,6 +51,10 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const [logLoading, setLogLoading] = useState(false);
   const logContainerRef = useRef(null);
 
+  // Related tasks state
+  const [relatedTasks, setRelatedTasks] = useState(null);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+
   // Timeline/replay state
   const [replayTimeline, setReplayTimeline] = useState(null);
   const [replayLoading, setReplayLoading] = useState(false);
@@ -79,6 +83,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
     setLogMeta([]);
     setSelectedLogPhase(null);
     setLogSearch('');
+    setRelatedTasks(null);
     setReplayTimeline(null);
     setReplayError(null);
     setExpandedEventId(null);
@@ -143,6 +148,19 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
         setReplayLoading(false);
       });
   }, [activeTab, task?.id, replayTimeline]);
+
+  // Fetch related tasks when Related tab is selected
+  useEffect(() => {
+    if (activeTab !== 'related' || !task) return;
+    if (relatedTasks) return;
+    setRelatedLoading(true);
+    api.getSimilarTasks(task.id)
+      .then(data => {
+        setRelatedTasks(data.similar || []);
+        setRelatedLoading(false);
+      })
+      .catch(() => { setRelatedTasks([]); setRelatedLoading(false); });
+  }, [activeTab, task?.id, relatedTasks]);
 
   // Handle incoming replay result from WebSocket
   useEffect(() => {
@@ -379,6 +397,15 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
               onClick={() => setActiveTab('timeline')}
             >
               Timeline
+            </button>
+            <button
+              className={`modal-tab${activeTab === 'related' ? ' active' : ''}`}
+              onClick={() => setActiveTab('related')}
+            >
+              Related
+              {task.similarTasks?.length > 0 && (
+                <span className="modal-tab-badge">{task.similarTasks.length}</span>
+              )}
             </button>
           </div>
         )}
@@ -704,6 +731,30 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
                     }
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'related' && (
+          <div className="modal-section modal-related-section">
+            {relatedLoading && <p className="text-muted">Finding related tasks...</p>}
+            {!relatedLoading && relatedTasks && relatedTasks.length === 0 && (
+              <p className="text-muted">No similar tasks found.</p>
+            )}
+            {!relatedLoading && relatedTasks && relatedTasks.length > 0 && (
+              <div className="related-tasks-list">
+                {relatedTasks.map(rt => (
+                  <div key={rt.taskId} className="related-task-item">
+                    <div className="related-task-header">
+                      <span className="related-task-title">{rt.title}</span>
+                      <span className={`related-task-score score-${rt.score >= 0.7 ? 'high' : rt.score >= 0.4 ? 'medium' : 'low'}`}>
+                        {Math.round(rt.score * 100)}% match
+                      </span>
+                      <span className="related-task-status">{rt.status}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
