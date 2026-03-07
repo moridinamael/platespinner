@@ -12,7 +12,6 @@ function formatElapsed(ms) {
 function GenerateBar({
   generatingMap,
   onGenerate,
-  statusMessage,
   selectedProjectId,
   projects,
   templates,
@@ -263,7 +262,6 @@ Do NOT make any code changes. Only propose tasks as structured JSON above.`;
         </div>
       )}
 
-      {statusMessage && <span className="status-message">{statusMessage}</span>}
     </div>
   );
 }

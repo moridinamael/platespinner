@@ -116,6 +116,7 @@ function Sidebar({
   onTestNotification,
   onRequestNotificationPermission,
   onReorderProjects,
+  onShowToast,
   tasks,
   theme,
   onToggleTheme,
@@ -277,7 +278,7 @@ function Sidebar({
     try {
       await api.updateProject(selectedProjectId, { testCommand: trimmed });
       api.getTestInfo(selectedProjectId).then(setTestInfo).catch(() => {});
-    } catch { /* ignore */ }
+    } catch (err) { onShowToast?.('Failed to save test command: ' + err.message, 'error'); }
   };
 
   const handleRunTests = async () => {
@@ -286,8 +287,8 @@ function Sidebar({
     try {
       await api.runTests(selectedProjectId);
       // Status updates come via WebSocket (test-started / test-completed)
-    } catch {
-      // Only if the HTTP request itself fails (network error, 404, etc.)
+    } catch (err) {
+      onShowToast?.('Failed to start tests: ' + err.message, 'error');
     }
   };
 
@@ -295,7 +296,7 @@ function Sidebar({
     if (!selectedProjectId) return;
     try {
       await api.setupTests(selectedProjectId);
-    } catch { /* fire-and-forget, errors come via WS */ }
+    } catch (err) { onShowToast?.('Test setup failed: ' + err.message, 'error'); }
   };
 
   const handleRailwaySave = async () => {
@@ -304,14 +305,14 @@ function Sidebar({
     if (trimmed === (selectedProject?.railwayProject || '')) return;
     try {
       await api.updateProject(selectedProjectId, { railwayProject: trimmed });
-    } catch { /* ignore */ }
+    } catch (err) { onShowToast?.('Failed to save Railway config: ' + err.message, 'error'); }
   };
 
   const handleCheckRailway = async () => {
     if (!selectedProjectId) return;
     try {
       await api.checkRailway(selectedProjectId);
-    } catch { /* errors handled via WS broadcast */ }
+    } catch (err) { onShowToast?.('Railway check failed: ' + err.message, 'error'); }
   };
 
   // Cost dashboard data
@@ -337,7 +338,7 @@ function Sidebar({
     if (numVal === current || (numVal === null && current === null)) return;
     try {
       await api.updateProject(selectedProjectId, { budgetLimitUsd: numVal });
-    } catch { /* ignore */ }
+    } catch (err) { onShowToast?.('Failed to save budget: ' + err.message, 'error'); }
   };
 
   const canRunTests = testInfo && testInfo.source !== 'none';
@@ -590,7 +591,7 @@ function Sidebar({
                     />
                   </label>
                 )}
-                <button className="btn btn-sm" onClick={() => api.testEmailNotification()}>
+                <button className="btn btn-sm" onClick={() => api.testEmailNotification().catch(err => onShowToast?.(err.message, 'error'))}>
                   Test Email
                 </button>
               </details>

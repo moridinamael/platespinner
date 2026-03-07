@@ -13,6 +13,7 @@ import ErrorBoundary from './components/ErrorBoundary.jsx';
 import AnalyticsDashboard from './components/AnalyticsDashboard.jsx';
 import SkillEditor from './components/SkillEditor.jsx';
 import LoginScreen from './components/LoginScreen.jsx';
+import Toast from './components/Toast.jsx';
 import { matchesFilters } from './utils.js';
 
 export default function App() {
@@ -70,6 +71,8 @@ export default function App() {
   // Per-project Railway status: Map<projectId, { status: 'unknown'|'checking'|'healthy'|'failed', message: string, checkedAt: number }>
   const [railwayStatusMap, setRailwayStatusMap] = useState({});
   const [statusMessage, setStatusMessage] = useState(null);
+  const [statusType, setStatusType] = useState('info');
+  const statusTimerRef = useRef(null);
   const [selectedTask, setSelectedTask] = useState(null);
   const [templates, setTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('builtin:pareto-simple');
@@ -101,6 +104,15 @@ export default function App() {
   );
 
   const [models, setModels] = useState([]);
+
+  const showToast = useCallback((text, type = 'info', duration = 3000) => {
+    clearTimeout(statusTimerRef.current);
+    setStatusMessage(text);
+    setStatusType(type);
+    statusTimerRef.current = setTimeout(() => setStatusMessage(null), duration);
+  }, []);
+
+  useEffect(() => () => clearTimeout(statusTimerRef.current), []);
 
   useEffect(() => {
     api.authStatus().then(({ required, authenticated }) => {
@@ -140,7 +152,7 @@ export default function App() {
       if (Object.keys(railwayStatuses).length > 0) {
         setRailwayStatusMap(railwayStatuses);
       }
-    }).catch(console.error);
+    }).catch(err => showToast('Failed to load projects: ' + err.message, 'error', 5000));
     api.getTemplates().then(setTemplates).catch(console.error);
     api.getModels().then(setModels).catch(console.error);
     api.getAgentStatus().then(setAgentCensus).catch(console.error);
@@ -156,7 +168,7 @@ export default function App() {
       }
       setExecStartTimes(execStarts);
       setPlanStartTimes(planStarts);
-    }).catch(console.error);
+    }).catch(err => showToast('Failed to load tasks: ' + err.message, 'error', 5000));
     // Hydrate queue positions from server
     api.getQueues().then((queues) => {
       // queues is { projectId: [{ taskId, position }], ... }
@@ -289,13 +301,11 @@ export default function App() {
         const msg = data.skippedDuplicates
           ? `Generated ${data.taskCount} tasks (${data.skippedDuplicates} duplicates skipped)`
           : `Generated ${data.taskCount} tasks`;
-        setStatusMessage(msg);
-        setTimeout(() => setStatusMessage(null), 3000);
+        showToast(msg, 'success');
         break;
       }
       case 'generation:duplicates-found':
-        setStatusMessage(`${data.duplicates.length} potential duplicate(s) need review`);
-        setTimeout(() => setStatusMessage(null), 5000);
+        showToast(`${data.duplicates.length} potential duplicate(s) need review`, 'info', 5000);
         break;
       case 'generation:failed':
         delete pendingProgressRef.current.generating[data.projectId];
@@ -304,8 +314,7 @@ export default function App() {
           delete next[data.projectId];
           return next;
         });
-        setStatusMessage(`Generation failed: ${data.error}`);
-        setTimeout(() => setStatusMessage(null), 5000);
+        showToast(`Generation failed: ${data.error}`, 'error', 5000);
         break;
 
       // --- Planning ---
@@ -349,8 +358,7 @@ export default function App() {
             t.id === data.taskId ? { ...t, status: 'proposed', agentLog: data.error } : t
           )
         );
-        setStatusMessage(`Planning failed: ${data.error}`);
-        setTimeout(() => setStatusMessage(null), 5000);
+        showToast(`Planning failed: ${data.error}`, 'error', 5000);
         break;
 
       // --- Execution with stable start times ---
@@ -410,8 +418,7 @@ export default function App() {
         }));
         break;
       case 'execution:file-conflicts':
-        setStatusMessage(`Warning: Task may conflict with ${data.conflicts.length} other task(s) on shared files`);
-        setTimeout(() => setStatusMessage(null), 8000);
+        showToast(`Warning: Task may conflict with ${data.conflicts.length} other task(s) on shared files`, 'info', 8000);
         break;
       case 'execution:completed':
         clearProgress(data.taskId);
@@ -445,8 +452,7 @@ export default function App() {
             t.id === data.taskId ? { ...t, status: data.status || 'proposed', agentLog: data.error } : t
           )
         );
-        setStatusMessage(data.aborted ? 'Task aborted' : `Execution failed: ${data.error}`);
-        setTimeout(() => setStatusMessage(null), 5000);
+        showToast(data.aborted ? 'Task aborted' : `Execution failed: ${data.error}`, 'error', 5000);
         break;
       case 'log:chunk': {
         const key = data.taskId;
@@ -600,11 +606,10 @@ export default function App() {
         );
         break;
       case 'pr:creation-failed':
-        setStatusMessage(`Auto-PR failed: ${data.error}`);
-        setTimeout(() => setStatusMessage(null), 5000);
+        showToast(`Auto-PR failed: ${data.error}`, 'error', 5000);
         break;
     }
-  }, [scheduleFlush]);
+  }, [scheduleFlush, showToast]);
 
   useEffect(() => {
     const manager = new WebSocketManager(handleWsMessage);
@@ -626,34 +631,33 @@ export default function App() {
     try {
       await api.addProject({ name, path });
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleRemoveProject = useCallback(async (id) => {
     try {
       await api.removeProject(id);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleUpdateProjectUrl = useCallback(async (id, url) => {
     try {
       await api.updateProject(id, { url });
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleGenerate = useCallback(async (modelId, promptContent) => {
     try {
       await api.generate(selectedProjectId, selectedTemplateId, modelId, promptContent);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
+      showToast(err.message, 'error');
     }
-  }, [selectedProjectId, selectedTemplateId]);
+  }, [selectedProjectId, selectedTemplateId, showToast]);
 
   const handleCreateTemplate = useCallback(async ({ name, content }) => {
     try {
@@ -661,10 +665,9 @@ export default function App() {
       setTemplates((prev) => [...prev, created]);
       setSelectedTemplateId(created.id);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleDeleteTemplate = useCallback(async (id) => {
     try {
@@ -672,10 +675,9 @@ export default function App() {
       setTemplates((prev) => prev.filter((t) => t.id !== id));
       setSelectedTemplateId((prev) => (prev === id ? 'builtin:pareto-simple' : prev));
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleOpenSkillEditor = useCallback((sk = null) => {
     setEditingSkill(sk);
@@ -702,36 +704,33 @@ export default function App() {
     try {
       await api.planTask(taskId, modelId);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(`Plan failed: ${err.message}`, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleExecute = useCallback(async (taskId, modelId) => {
     try {
       await api.executeTask(taskId, modelId);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(`Execute failed: ${err.message}`, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleDismiss = useCallback(async (taskId) => {
     try {
       await api.dismissTask(taskId);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleAbort = useCallback(async (taskId) => {
     try {
       await api.abortTask(taskId);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleUpdateTask = useCallback(async (taskId, updates) => {
     try {
@@ -739,56 +738,50 @@ export default function App() {
       setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
       setSelectedTask((prev) => (prev && prev.id === updated.id ? updated : prev));
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleDequeue = useCallback(async (taskId) => {
     try {
       await api.dequeueTask(taskId);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleCreateFixTask = useCallback(async (projectId, summary, output) => {
     try {
       await api.createFixTask(projectId, { summary, output });
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleStartAutoclicker = useCallback(async (config) => {
     try {
       await api.startAutoclicker(config);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleUpdateNotificationSettings = useCallback(async (updates) => {
     try {
       const updated = await api.updateNotificationSettings(null, updates);
       setNotificationSettings(updated);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleTestNotification = useCallback(async () => {
     try {
       await api.testNotification();
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleRequestNotificationPermission = useCallback(async () => {
     if (!('Notification' in window)) return;
@@ -800,11 +793,9 @@ export default function App() {
     if (!task) return;
     try {
       const result = await api.mergeTask(task.projectId, taskId, strategy || 'merge');
-      setStatusMessage(result.message || 'Branch merged successfully');
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(result.message || 'Branch merged successfully', 'success');
     } catch (err) {
-      setStatusMessage(`Merge failed: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 5000);
+      showToast(`Merge failed: ${err.message}`, 'error', 5000);
     }
   };
 
@@ -813,11 +804,9 @@ export default function App() {
     if (!task) return;
     try {
       const result = await api.createPR(task.projectId, taskId);
-      setStatusMessage(`PR created: ${result.prUrl}`);
-      setTimeout(() => setStatusMessage(null), 5000);
+      showToast(`PR created: ${result.prUrl}`, 'success', 5000);
     } catch (err) {
-      setStatusMessage(`PR creation failed: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 5000);
+      showToast(`PR creation failed: ${err.message}`, 'error', 5000);
     }
   };
 
@@ -826,11 +815,9 @@ export default function App() {
     if (!task) return;
     try {
       const result = await api.mergePR(task.projectId, taskId, strategy || 'merge');
-      setStatusMessage(result.message || 'PR merged successfully');
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(result.message || 'PR merged successfully', 'success');
     } catch (err) {
-      setStatusMessage(`PR merge failed: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 5000);
+      showToast(`PR merge failed: ${err.message}`, 'error', 5000);
     }
   };
 
@@ -843,8 +830,7 @@ export default function App() {
       await api.reorderProjects(orderedIds);
     } catch (err) {
       api.getProjects().then(setProjects).catch(console.error);
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
   };
 
@@ -861,19 +847,17 @@ export default function App() {
       await api.reorderTasks(orderedIds);
     } catch (err) {
       api.getTasks().then(setTasks).catch(console.error);
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleRetry = useCallback(async (taskId) => {
     try {
       await api.retryTask(taskId);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleMoveTask = useCallback(async (taskId, sourceCol, targetCol) => {
     if (sourceCol === 'proposed' && targetCol === 'plan') {
@@ -888,22 +872,19 @@ export default function App() {
   const handleStopAll = useCallback(async () => {
     try {
       const result = await api.stopAll();
-      setStatusMessage(`Stopped: ${result.aborted} aborted, ${result.dequeued} dequeued`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(`Stopped: ${result.aborted} aborted, ${result.dequeued} dequeued`, 'success');
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleStopAutoclicker = useCallback(async () => {
     try {
       await api.stopAutoclicker();
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   // Filter persistence via localStorage
   useEffect(() => {
@@ -957,10 +938,9 @@ export default function App() {
     try {
       await api.batchAction('plan', proposedIds);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, [filteredTasks]);
+  }, [filteredTasks, showToast]);
 
   const handleExecuteAll = useCallback(async () => {
     const plannedIds = filteredTasks
@@ -971,10 +951,9 @@ export default function App() {
     try {
       await api.batchAction('execute', plannedIds);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, [filteredTasks]);
+  }, [filteredTasks, showToast]);
 
   const filterActive = !!(filters.search || filters.efforts.length || filters.statuses.length || filters.modelId || filters.hasPlan || filters.dateFrom || filters.dateTo);
 
@@ -1283,6 +1262,7 @@ export default function App() {
           onTestNotification={handleTestNotification}
           onRequestNotificationPermission={handleRequestNotificationPermission}
           onReorderProjects={handleReorderProjects}
+          onShowToast={showToast}
           tasks={tasks}
           theme={theme}
           onToggleTheme={toggleTheme}
@@ -1294,7 +1274,6 @@ export default function App() {
         <GenerateBar
           generatingMap={generatingMap}
           onGenerate={handleGenerate}
-          statusMessage={statusMessage}
           selectedProjectId={selectedProjectId}
           projects={projects}
           templates={templates}
@@ -1456,6 +1435,7 @@ export default function App() {
           onImport={handleImportSkills}
         />
       )}
+      <Toast message={statusMessage} type={statusType} onDismiss={() => setStatusMessage(null)} />
     </div>
   );
 }
