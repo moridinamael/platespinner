@@ -73,12 +73,16 @@ router.patch('/tasks/:id', (req, res) => {
     }
   }
 
-  const STRING_LIMITS = { title: 200, description: 5000, rationale: 2000, plan: 50000 };
+  const STRING_LIMITS = { title: 500, description: 10000, rationale: 2000, plan: 50000 };
   for (const [field, maxLen] of Object.entries(STRING_LIMITS)) {
     if (field in updates) {
       const err = validateStringField(updates[field], field, { maxLength: maxLen });
       if (err) return res.status(400).json({ error: err });
     }
+  }
+
+  if ('title' in updates && (updates.title === null || updates.title.trim() === '')) {
+    return res.status(400).json({ error: 'title must be a non-empty string' });
   }
 
   if (Object.keys(updates).length === 0) {
