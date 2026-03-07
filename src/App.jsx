@@ -10,6 +10,7 @@ import CardModal from './components/CardModal.jsx';
 import PlatesSpinning from './components/PlatesSpinning.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+import AnalyticsDashboard from './components/AnalyticsDashboard.jsx';
 import { matchesFilters } from './utils.js';
 
 export default function App() {
@@ -47,7 +48,7 @@ export default function App() {
   const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
-  const [activeTab, setActiveTab] = useState('board'); // 'board' | 'preview'
+  const [activeTab, setActiveTab] = useState('board'); // 'board' | 'preview' | 'dashboard'
   // Per-project generation tracking: Map<projectId, { startedAt, bytesReceived }>
   const [generatingMap, setGeneratingMap] = useState({});
   // Per-project test setup tracking: Map<projectId, { startedAt, bytesReceived }>
@@ -1255,22 +1256,28 @@ export default function App() {
           onFiltersChange={setFilters}
           models={models}
         />
-        {hasPreview && (
-          <div className="tab-bar">
-            <button
-              className={`tab ${activeTab === 'board' ? 'tab-active' : ''}`}
-              onClick={() => setActiveTab('board')}
-            >
-              Board
-            </button>
+        <div className="tab-bar">
+          <button
+            className={`tab ${activeTab === 'board' ? 'tab-active' : ''}`}
+            onClick={() => setActiveTab('board')}
+          >
+            Board
+          </button>
+          <button
+            className={`tab ${activeTab === 'dashboard' ? 'tab-active' : ''}`}
+            onClick={() => setActiveTab('dashboard')}
+          >
+            Dashboard
+          </button>
+          {hasPreview && (
             <button
               className={`tab ${activeTab === 'preview' ? 'tab-active' : ''}`}
               onClick={() => setActiveTab('preview')}
             >
               Preview
             </button>
-          </div>
-        )}
+          )}
+        </div>
         {activeTab === 'board' ? (
           <ErrorBoundary name="Board">
             <KanbanBoard
@@ -1310,6 +1317,15 @@ export default function App() {
                 models={models}
               />
             )}
+          </ErrorBoundary>
+        ) : activeTab === 'dashboard' ? (
+          <ErrorBoundary name="Dashboard">
+            <AnalyticsDashboard
+              selectedProjectId={selectedProjectId}
+              projects={projects}
+              models={models}
+              tasks={tasks}
+            />
           </ErrorBoundary>
         ) : (
           <div className="preview-container">

@@ -50,6 +50,7 @@ function _serialize() {
       maxParallel: autoclickerConfig.maxParallel,
       standoffSeconds: autoclickerConfig.standoffSeconds,
     },
+    autoclickerAuditLog: autoclickerAuditLog,
   }, null, 2);
 }
 
@@ -129,6 +130,12 @@ export function load() {
       autoclickerConfig.maxParallel = data.autoclicker.maxParallel || 3;
       autoclickerConfig.standoffSeconds = data.autoclicker.standoffSeconds || 0;
       autoclickerConfig.running = false; // Never auto-resume
+    }
+
+    // Restore autoclicker audit log
+    if (Array.isArray(data.autoclickerAuditLog)) {
+      autoclickerAuditLog.length = 0;
+      autoclickerAuditLog.push(...data.autoclickerAuditLog);
     }
 
     // Backfill sortOrder for existing projects missing it
@@ -299,6 +306,89 @@ export function getProjectCostSummary(projectId) {
   costTimeline.sort((a, b) => a.timestamp - b.timestamp);
 
   return { totalCost, costByEffort, costTimeline, taskCount: projectTasks.length };
+}
+
+export function getAnalyticsData(projectId) {
+  const allTasks = getTasks(projectId);
+
+  // 1. Cost over time (daily aggregation)
+  const costByDay = new Map();
+  for (const t of allTasks) {
+    if (!t.costUsd) continue;
+    const day = new Date(t.createdAt).toISOString().slice(0, 10);
+    if (!costByDay.has(day)) costByDay.set(day, { date: day, total: 0, byModel: {}, byProject: {} });
+    const entry = costByDay.get(day);
+    entry.total += t.costUsd;
+    const model = t.executedBy || t.plannedBy || t.generatedBy || 'unknown';
+    entry.byModel[model] = (entry.byModel[model] || 0) + t.costUsd;
+    entry.byProject[t.projectId] = (entry.byProject[t.projectId] || 0) + t.costUsd;
+  }
+  const costTimeline = [...costByDay.values()].sort((a, b) => a.date.localeCompare(b.date));
+
+  // 2. Task throughput
+  const statusCounts = {};
+  for (const t of allTasks) statusCounts[t.status] = (statusCounts[t.status] || 0) + 1;
+  const conversionRate = allTasks.length > 0 ? (statusCounts.done || 0) / allTasks.length * 100 : 0;
+
+  const throughputByDay = new Map();
+  for (const t of allTasks) {
+    if (t.status !== 'done') continue;
+    const day = new Date(t.createdAt).toISOString().slice(0, 10);
+    throughputByDay.set(day, (throughputByDay.get(day) || 0) + 1);
+  }
+  const throughputTimeline = [...throughputByDay.entries()]
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // 3. Success/failure by model
+  const modelStats = {};
+  for (const t of allTasks) {
+    const model = t.executedBy || t.plannedBy || t.generatedBy || 'unknown';
+    if (!modelStats[model]) modelStats[model] = { total: 0, done: 0, costTotal: 0, tokenInput: 0, tokenOutput: 0 };
+    const ms = modelStats[model];
+    ms.total++;
+    if (t.status === 'done') ms.done++;
+    ms.costTotal += t.costUsd || 0;
+    if (t.tokenUsage) {
+      for (const phase of Object.values(t.tokenUsage)) {
+        ms.tokenInput += phase.input || 0;
+        ms.tokenOutput += phase.output || 0;
+      }
+    }
+  }
+
+  // 4. Token usage breakdown (by phase)
+  const tokensByPhase = { generation: { input: 0, output: 0 }, planning: { input: 0, output: 0 }, execution: { input: 0, output: 0 }, judgment: { input: 0, output: 0 } };
+  for (const t of allTasks) {
+    if (!t.tokenUsage) continue;
+    for (const [phase, usage] of Object.entries(t.tokenUsage)) {
+      if (tokensByPhase[phase]) {
+        tokensByPhase[phase].input += usage.input || 0;
+        tokensByPhase[phase].output += usage.output || 0;
+      }
+    }
+  }
+
+  // 5. Cost by effort
+  const costByEffort = { small: { cost: 0, count: 0 }, medium: { cost: 0, count: 0 }, large: { cost: 0, count: 0 } };
+  for (const t of allTasks) {
+    if (t.effort && costByEffort[t.effort]) {
+      costByEffort[t.effort].cost += t.costUsd || 0;
+      costByEffort[t.effort].count++;
+    }
+  }
+
+  return {
+    costTimeline,
+    statusCounts,
+    conversionRate,
+    throughputTimeline,
+    modelStats,
+    tokensByPhase,
+    costByEffort,
+    totalTasks: allTasks.length,
+    totalCost: allTasks.reduce((s, t) => s + (t.costUsd || 0), 0),
+  };
 }
 
 export function updateTask(id, updates) {

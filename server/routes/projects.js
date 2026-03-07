@@ -346,6 +346,44 @@ router.get('/costs/summary', (req, res) => {
   res.json({ grandTotal, projects: summaries });
 });
 
+// Analytics dashboard data
+router.get('/analytics', (req, res) => {
+  const projectId = req.query.projectId || null;
+  const analytics = state.getAnalyticsData(projectId);
+
+  // Add autoclicker metrics
+  const auditLog = state.getAuditLog(500);
+  const filteredLog = projectId
+    ? auditLog.filter(e => e.projectId === projectId)
+    : auditLog;
+
+  const autoclickerActions = { propose: 0, plan: 0, execute: 0, skip: 0 };
+  let autoclickerTotalCost = 0;
+  for (const entry of filteredLog) {
+    autoclickerActions[entry.action] = (autoclickerActions[entry.action] || 0) + 1;
+    autoclickerTotalCost += entry.costUsd || 0;
+  }
+  const totalCycles = Object.values(autoclickerActions).reduce((s, v) => s + v, 0);
+  const actionfulCycles = totalCycles - autoclickerActions.skip;
+
+  const projectMap = {};
+  for (const p of state.getProjects()) {
+    projectMap[p.id] = p.name;
+  }
+
+  analytics.autoclicker = {
+    actions: autoclickerActions,
+    totalCycles,
+    actionfulCycles,
+    totalCost: autoclickerTotalCost,
+    costPerAction: actionfulCycles > 0 ? autoclickerTotalCost / actionfulCycles : 0,
+    recentDecisions: filteredLog.slice(-20),
+  };
+  analytics.projectMap = projectMap;
+
+  res.json(analytics);
+});
+
 // Merge a task's feature branch back to its base branch
 router.post('/projects/:projectId/tasks/:taskId/merge', async (req, res) => {
   const project = state.getProject(req.params.projectId);

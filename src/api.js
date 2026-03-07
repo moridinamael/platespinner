@@ -57,6 +57,7 @@ export const api = {
   testEmailNotification: (projectId) => request('POST', '/notifications/test-email', { projectId }),
   getProjectCosts: (id) => request('GET', `/projects/${id}/costs`),
   getCostsSummary: () => request('GET', '/costs/summary'),
+  getAnalytics: (projectId) => request('GET', `/analytics${projectId ? `?projectId=${projectId}` : ''}`),
   mergeTask: (projectId, taskId, strategy) => request('POST', `/projects/${projectId}/tasks/${taskId}/merge`, { strategy }),
   createPR: (projectId, taskId) => request('POST', `/projects/${projectId}/tasks/${taskId}/create-pr`),
   mergePR: (projectId, taskId, strategy) => request('POST', `/projects/${projectId}/tasks/${taskId}/merge-pr`, { strategy }),
