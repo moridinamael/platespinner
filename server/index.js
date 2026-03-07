@@ -19,6 +19,7 @@ import { broadcast } from './ws.js';
 import { startDigestScheduler, stopDigestScheduler } from './digest.js';
 import pluginRoutes from './routes/plugins.js';
 import { loadPlugins } from './plugins/loader.js';
+import { rehydratePRTracking } from './prStatus.js';
 
 function isPrivateIP(ip) {
   // Handle IPv4-mapped IPv6 (::ffff:x.x.x.x)
@@ -202,6 +203,8 @@ if (pluginResult.loaded > 0) {
 if (pluginResult.errors.length > 0) {
   console.warn(`${pluginResult.errors.length} plugin(s) failed to load`);
 }
+
+rehydratePRTracking();
 
 server.listen(PORT, HOST, () => {
   console.log(`Server running on http://${HOST}:${PORT}`);

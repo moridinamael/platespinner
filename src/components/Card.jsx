@@ -13,7 +13,7 @@ const ActivitySpinner = ({ variant }) => (
   </svg>
 );
 
-function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, isFocused, onRetry, isBlocked }) {
+function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, onMergePR, isFocused, onRetry, isBlocked }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
@@ -219,18 +219,46 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
         )}
       </div>
 
-      {isDone && task.branch && (
+      {isDone && (task.branch || task.prUrl) && (
         <div className="card-done-actions" onClick={(e) => e.stopPropagation()}>
-          <button className="btn btn-sm btn-merge" onClick={(e) => { e.stopPropagation(); onMerge?.(task.id); }}>
-            Merge
-          </button>
-          <button className="btn btn-sm btn-pr" onClick={(e) => { e.stopPropagation(); onCreatePR?.(task.id); }}>
-            Create PR
-          </button>
+          {!task.merged && task.branch && !task.prUrl && (
+            <>
+              <button className="btn btn-sm btn-merge" onClick={(e) => { e.stopPropagation(); onMerge?.(task.id); }}>
+                Merge
+              </button>
+              <button className="btn btn-sm btn-pr" onClick={(e) => { e.stopPropagation(); onCreatePR?.(task.id); }}>
+                Create PR
+              </button>
+            </>
+          )}
           {task.prUrl && (
-            <a href={task.prUrl} target="_blank" rel="noopener noreferrer" className="pr-link" onClick={(e) => e.stopPropagation()}>
-              PR
-            </a>
+            <>
+              <a href={task.prUrl} target="_blank" rel="noopener noreferrer" className="pr-link" onClick={(e) => e.stopPropagation()}>
+                PR #{task.prNumber || ''}
+              </a>
+              {task.prStatus && task.prStatus.ciStatus && task.prStatus.ciStatus !== 'unknown' && (
+                <span className={`pr-status-badge pr-ci-${task.prStatus.ciStatus}`}>
+                  {task.prStatus.ciStatus === 'passed' ? 'CI \u2713' :
+                   task.prStatus.ciStatus === 'failed' ? 'CI \u2717' :
+                   task.prStatus.ciStatus === 'pending' ? 'CI ...' : ''}
+                </span>
+              )}
+              {task.prStatus?.reviewDecision && (
+                <span className={`pr-status-badge pr-review-${task.prStatus.reviewDecision.toLowerCase()}`}>
+                  {task.prStatus.reviewDecision === 'APPROVED' ? 'Approved' :
+                   task.prStatus.reviewDecision === 'CHANGES_REQUESTED' ? 'Changes' :
+                   'Review needed'}
+                </span>
+              )}
+              {!task.merged && (
+                <button className="btn btn-sm btn-merge" onClick={(e) => { e.stopPropagation(); onMergePR?.(task.id); }}>
+                  Merge PR
+                </button>
+              )}
+              {task.merged && (
+                <span className="pr-merged-badge">Merged</span>
+              )}
+            </>
           )}
         </div>
       )}

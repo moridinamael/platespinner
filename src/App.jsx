@@ -565,6 +565,19 @@ export default function App() {
         break;
       case 'replay:progress':
         break;
+      case 'task:pr-status':
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === data.taskId
+              ? { ...t, prStatus: data.prStatus }
+              : t
+          )
+        );
+        break;
+      case 'pr:creation-failed':
+        setStatusMessage(`Auto-PR failed: ${data.error}`);
+        setTimeout(() => setStatusMessage(null), 5000);
+        break;
     }
   }, [scheduleFlush]);
 
@@ -758,6 +771,19 @@ export default function App() {
       setTimeout(() => setStatusMessage(null), 5000);
     } catch (err) {
       setStatusMessage(`PR creation failed: ${err.message}`);
+      setTimeout(() => setStatusMessage(null), 5000);
+    }
+  };
+
+  const handleMergePR = async (taskId, strategy) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    try {
+      const result = await api.mergePR(task.projectId, taskId, strategy || 'merge');
+      setStatusMessage(result.message || 'PR merged successfully');
+      setTimeout(() => setStatusMessage(null), 3000);
+    } catch (err) {
+      setStatusMessage(`PR merge failed: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 5000);
     }
   };
@@ -1252,6 +1278,7 @@ export default function App() {
               onSelectTask={setSelectedTask}
               onMerge={handleMerge}
               onCreatePR={handleCreatePR}
+              onMergePR={handleMergePR}
               models={models}
               selectedIds={selectedIds}
               onToggleSelect={handleToggleSelect}
@@ -1305,6 +1332,7 @@ export default function App() {
           onUpdateTask={handleUpdateTask}
           onMerge={handleMerge}
           onCreatePR={handleCreatePR}
+          onMergePR={handleMergePR}
           models={models}
           streamingLog={selectedTask ? (logBufferRef.current[selectedTask.id] || '') : ''}
           logStreamVersion={logStreamVersion}

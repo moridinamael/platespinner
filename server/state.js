@@ -196,7 +196,7 @@ load();
 
 export function addProject({ name, path, url, testCommand }) {
   const id = randomUUID();
-  const project = { id, name: name || path.split('/').filter(Boolean).pop(), path, url: url || null, testCommand: testCommand || null, autoTestOnCommit: false, lastTestResult: null, lastRailwayResult: null, budgetLimitUsd: null, branchStrategy: 'direct', sortOrder: projects.size };
+  const project = { id, name: name || path.split('/').filter(Boolean).pop(), path, url: url || null, testCommand: testCommand || null, autoTestOnCommit: false, lastTestResult: null, lastRailwayResult: null, budgetLimitUsd: null, branchStrategy: 'direct', sortOrder: projects.size, autoCreatePR: false, prTemplate: null, prReviewers: null, prBaseBranch: null };
   projects.set(id, project);
   save();
   return project;
@@ -253,6 +253,8 @@ export function addTask({ projectId, title, description, rationale, effort, gene
     branch: null,
     baseBranch: null,
     prUrl: null,
+    prNumber: null,
+    prStatus: null,
     agentLog: null,
     diff: null,
     tokenUsage: null,

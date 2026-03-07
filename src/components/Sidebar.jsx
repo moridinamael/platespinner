@@ -874,6 +874,67 @@ function Sidebar({
               <option value="per-batch">Per-batch (branch per generation)</option>
             </select>
           </label>
+          <label className="setting-field setting-field-row">
+            <input
+              type="checkbox"
+              className="setting-checkbox"
+              checked={!!selectedProject?.autoCreatePR}
+              onChange={async (e) => {
+                try {
+                  await api.updateProject(selectedProjectId, { autoCreatePR: e.target.checked });
+                } catch { /* ignore */ }
+              }}
+            />
+            <span className="setting-label">Auto-create PR after execution</span>
+          </label>
+          {selectedProject?.autoCreatePR && (
+            <>
+              <label className="setting-field">
+                <span className="setting-label">PR Reviewers</span>
+                <input
+                  type="text"
+                  className="input input-sm"
+                  placeholder="user1,user2"
+                  defaultValue={selectedProject?.prReviewers || ''}
+                  onBlur={async (e) => {
+                    try {
+                      await api.updateProject(selectedProjectId, { prReviewers: e.target.value.trim() || null });
+                    } catch { /* ignore */ }
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                />
+              </label>
+              <label className="setting-field">
+                <span className="setting-label">PR Base Branch</span>
+                <input
+                  type="text"
+                  className="input input-sm"
+                  placeholder="main (default)"
+                  defaultValue={selectedProject?.prBaseBranch || ''}
+                  onBlur={async (e) => {
+                    try {
+                      await api.updateProject(selectedProjectId, { prBaseBranch: e.target.value.trim() || null });
+                    } catch { /* ignore */ }
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                />
+              </label>
+              <label className="setting-field">
+                <span className="setting-label">PR Body Template</span>
+                <textarea
+                  className="input input-sm"
+                  placeholder={'## {{title}}\n\n{{description}}\n\n{{rationale}}'}
+                  rows={4}
+                  defaultValue={selectedProject?.prTemplate || ''}
+                  onBlur={async (e) => {
+                    try {
+                      await api.updateProject(selectedProjectId, { prTemplate: e.target.value.trim() || null });
+                    } catch { /* ignore */ }
+                  }}
+                />
+              </label>
+            </>
+          )}
         </div>
       )}
 

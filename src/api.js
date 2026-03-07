@@ -59,6 +59,7 @@ export const api = {
   getCostsSummary: () => request('GET', '/costs/summary'),
   mergeTask: (projectId, taskId, strategy) => request('POST', `/projects/${projectId}/tasks/${taskId}/merge`, { strategy }),
   createPR: (projectId, taskId) => request('POST', `/projects/${projectId}/tasks/${taskId}/create-pr`),
+  mergePR: (projectId, taskId, strategy) => request('POST', `/projects/${projectId}/tasks/${taskId}/merge-pr`, { strategy }),
   getAgentStatus: () => request('GET', '/agents/status'),
   startAutoclicker: (config) => request('POST', '/autoclicker/start', config),
   stopAutoclicker: () => request('POST', '/autoclicker/stop'),

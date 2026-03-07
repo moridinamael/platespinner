@@ -11,7 +11,7 @@ const COLUMNS = [
   { key: 'failed', title: 'Failed', statuses: ['failed'] },
 ];
 
-function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive, onPlanAll, onExecuteAll, focusedTaskId, onReorderTasks, onMoveTask, onRetry, blockedTaskIds }) {
+function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, onMergePR, models, selectedIds, onToggleSelect, filterActive, onPlanAll, onExecuteAll, focusedTaskId, onReorderTasks, onMoveTask, onRetry, blockedTaskIds }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -115,6 +115,7 @@ function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecut
             onSelectTask={onSelectTask}
             onMerge={onMerge}
             onCreatePR={onCreatePR}
+            onMergePR={onMergePR}
             models={models}
             selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}

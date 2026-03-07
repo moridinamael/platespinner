@@ -15,6 +15,8 @@ import { registerAgent, unregisterAgent } from '../census.js';
 import { emitNotification, checkAllTasksDone } from '../notifications.js';
 import { writeReplayEvent, compressReplayLog } from './replay.js';
 import { runPostExecutionHooks, runPreExecutionHooks, runPostPlanningHooks, runTaskValidators, emitPluginEvent } from '../plugins/manager.js';
+import { renderPRBody } from '../prUtils.js';
+import { trackPR, fetchPRStatus } from '../prStatus.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
 
@@ -732,6 +734,45 @@ export async function runExecution(task, modelId) {
           passed: false,
           summary: testErr.message || 'Test execution error',
         });
+      }
+    }
+
+    // Auto-create PR if enabled and on per-task branch
+    const currentTask = state.getTask(task.id);
+    if (branchName && project.autoCreatePR && currentTask && currentTask.status === 'done' && currentTask.commitHash && !currentTask.prUrl) {
+      try {
+        const prBody = renderPRBody(project.prTemplate, currentTask);
+        await gitExec(['push', '-u', 'origin', branchName], cwd);
+
+        const prArgs = ['pr', 'create', '--head', branchName, '--title', currentTask.title, '--body', prBody];
+        if (project.prBaseBranch) prArgs.push('--base', project.prBaseBranch);
+        if (project.prReviewers) prArgs.push('--reviewer', project.prReviewers);
+
+        const prOutput = await new Promise((resolve, reject) => {
+          execFile('gh', prArgs, { cwd, timeout: 30000 }, (err, stdout) => {
+            if (err) return reject(err);
+            resolve(stdout.trim());
+          });
+        });
+
+        const prUrl = prOutput.trim();
+        const prNumberMatch = prUrl.match(/\/pull\/(\d+)$/);
+        const prNumber = prNumberMatch ? parseInt(prNumberMatch[1]) : null;
+
+        state.updateTask(task.id, { prUrl, prNumber });
+        broadcast('task:updated', state.getTask(task.id));
+
+        if (prNumber) {
+          trackPR(task.id, project.id, prNumber);
+          try {
+            const prStatus = await fetchPRStatus(project.path, prNumber);
+            state.updateTask(task.id, { prStatus });
+            broadcast('task:pr-status', { taskId: task.id, prStatus });
+          } catch { /* initial status fetch is best-effort */ }
+        }
+      } catch (prErr) {
+        console.error('Auto-PR creation failed:', prErr.message);
+        broadcast('pr:creation-failed', { taskId: task.id, error: prErr.message });
       }
     }
 

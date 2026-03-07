@@ -19,7 +19,7 @@ function formatEventType(type) {
   }
 }
 
-function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models, streamingLog, logStreamVersion, replayResult, allTasks, blockedTaskIds }) {
+function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, onMergePR, models, streamingLog, logStreamVersion, replayResult, allTasks, blockedTaskIds }) {
   if (!task) return null;
 
   const isProposed = task.status === 'proposed';
@@ -324,7 +324,27 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
             <span className="branch-badge">{task.branch}</span>
           )}
           {isDone && task.prUrl && (
-            <a href={task.prUrl} target="_blank" rel="noopener noreferrer" className="pr-link">PR</a>
+            <a href={task.prUrl} target="_blank" rel="noopener noreferrer" className="pr-link">
+              PR #{task.prNumber || ''}
+            </a>
+          )}
+          {isDone && task.prStatus && task.prStatus.ciStatus && task.prStatus.ciStatus !== 'unknown' && (
+            <span className={`pr-status-badge pr-ci-${task.prStatus.ciStatus}`}>
+              CI: {task.prStatus.ciStatus}
+            </span>
+          )}
+          {isDone && task.prStatus?.reviewDecision && (
+            <span className={`pr-status-badge pr-review-${task.prStatus.reviewDecision.toLowerCase()}`}>
+              {task.prStatus.reviewDecision}
+            </span>
+          )}
+          {isDone && task.prStatus?.mergeable && task.prStatus.mergeable !== 'UNKNOWN' && (
+            <span className={`pr-status-badge pr-mergeable-${task.prStatus.mergeable.toLowerCase()}`}>
+              {task.prStatus.mergeable === 'MERGEABLE' ? 'Mergeable' : 'Conflicts'}
+            </span>
+          )}
+          {isDone && task.merged && (
+            <span className="pr-merged-badge">Merged</span>
           )}
           {task.costUsd > 0 && (
             <span className="cost-badge">{formatCost(task.costUsd)}</span>
@@ -801,22 +821,45 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
           </div>
         )}
 
-        {isDone && task.branch && (
+        {isDone && (task.branch || task.prUrl) && (
           <div className="modal-actions">
-            <select
-              className="select model-select"
-              value={mergeStrategy}
-              onChange={(e) => setMergeStrategy(e.target.value)}
-            >
-              <option value="merge">Merge (--no-ff)</option>
-              <option value="squash">Squash & Merge</option>
-            </select>
-            <button className="btn btn-merge" onClick={() => { onMerge?.(task.id, mergeStrategy); onClose(); }}>
-              Merge to Main
-            </button>
-            <button className="btn btn-pr" onClick={() => { onCreatePR?.(task.id); }}>
-              Create PR
-            </button>
+            {!task.prUrl && task.branch && !task.merged && (
+              <>
+                <select
+                  className="select model-select"
+                  value={mergeStrategy}
+                  onChange={(e) => setMergeStrategy(e.target.value)}
+                >
+                  <option value="merge">Merge (--no-ff)</option>
+                  <option value="squash">Squash & Merge</option>
+                </select>
+                <button className="btn btn-merge" onClick={() => { onMerge?.(task.id, mergeStrategy); onClose(); }}>
+                  Merge Locally
+                </button>
+                <button className="btn btn-pr" onClick={() => { onCreatePR?.(task.id); }}>
+                  Create PR
+                </button>
+              </>
+            )}
+            {task.prUrl && !task.merged && (
+              <>
+                <select
+                  className="select model-select"
+                  value={mergeStrategy}
+                  onChange={(e) => setMergeStrategy(e.target.value)}
+                >
+                  <option value="merge">Merge</option>
+                  <option value="squash">Squash</option>
+                  <option value="rebase">Rebase</option>
+                </select>
+                <button className="btn btn-merge" onClick={() => { onMergePR?.(task.id, mergeStrategy); onClose(); }}>
+                  Merge PR
+                </button>
+              </>
+            )}
+            {task.merged && (
+              <span className="pr-merged-badge">PR Merged</span>
+            )}
           </div>
         )}
       </div>

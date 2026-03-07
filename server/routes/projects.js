@@ -7,6 +7,8 @@ import { detectTestFramework, runTests, validateTestCommand } from '../testing.j
 import { runTestSetup } from '../agents/runner.js';
 import { MODELS } from '../models.js';
 import { emitNotification } from '../notifications.js';
+import { renderPRBody } from '../prUtils.js';
+import { trackPR, untrackPR, fetchPRStatus } from '../prStatus.js';
 
 const RAILWAY_BIN = process.env.RAILWAY_BIN || 'railway';
 
@@ -100,6 +102,10 @@ router.patch('/projects/:id', (req, res) => {
     const val = req.body.budgetLimitUsd;
     updates.budgetLimitUsd = (val === null || val === '') ? null : Number(val);
   }
+  if ('autoCreatePR' in req.body) updates.autoCreatePR = !!req.body.autoCreatePR;
+  if ('prTemplate' in req.body) updates.prTemplate = req.body.prTemplate || null;
+  if ('prReviewers' in req.body) updates.prReviewers = req.body.prReviewers || null;
+  if ('prBaseBranch' in req.body) updates.prBaseBranch = req.body.prBaseBranch || null;
   const updated = state.updateProject(req.params.id, updates);
   broadcast('project:updated', updated);
   res.json(updated);
@@ -424,22 +430,95 @@ router.post('/projects/:projectId/tasks/:taskId/create-pr', async (req, res) => 
     // Push branch to remote
     await execPromise('git', ['push', '-u', 'origin', task.branch], { cwd, timeout: 60000 });
 
-    // Create PR using gh CLI
-    const prBody = `## ${task.title}\n\n${task.description || ''}\n\n${task.rationale ? `**Rationale:** ${task.rationale}` : ''}`;
-    const prOutput = await execPromise('gh', [
+    // Build PR body from project template or default
+    const prBody = renderPRBody(project.prTemplate, task);
+
+    const prArgs = [
       'pr', 'create',
       '--head', task.branch,
       '--title', task.title,
       '--body', prBody,
-    ], { cwd, timeout: 30000 });
+    ];
+    if (project.prBaseBranch) prArgs.push('--base', project.prBaseBranch);
+    if (project.prReviewers) prArgs.push('--reviewer', project.prReviewers);
 
-    const prUrl = prOutput.trim();
-    state.updateTask(task.id, { prUrl });
+    let prUrl;
+    try {
+      const prOutput = await execPromise('gh', prArgs, { cwd, timeout: 30000 });
+      prUrl = prOutput.trim();
+    } catch (createErr) {
+      // Handle "already exists" — find existing PR
+      if (createErr.message && createErr.message.includes('already exists')) {
+        const viewOutput = await execPromise('gh', ['pr', 'view', task.branch, '--json', 'url,number'], { cwd, timeout: 15000 });
+        const viewData = JSON.parse(viewOutput.trim());
+        prUrl = viewData.url;
+        const prNumber = viewData.number;
+        state.updateTask(task.id, { prUrl, prNumber });
+        broadcast('task:updated', state.getTask(task.id));
+        if (prNumber) {
+          trackPR(task.id, project.id, prNumber);
+          try {
+            const prStatus = await fetchPRStatus(project.path, prNumber);
+            state.updateTask(task.id, { prStatus });
+            broadcast('task:pr-status', { taskId: task.id, prStatus });
+          } catch { /* best-effort */ }
+        }
+        return res.json({ prUrl });
+      }
+      throw createErr;
+    }
+
+    // Extract PR number from URL
+    const prNumberMatch = prUrl.match(/\/pull\/(\d+)$/);
+    const prNumber = prNumberMatch ? parseInt(prNumberMatch[1]) : null;
+
+    state.updateTask(task.id, { prUrl, prNumber });
     broadcast('task:updated', state.getTask(task.id));
+
+    // Track for status polling and fetch initial status
+    if (prNumber) {
+      trackPR(task.id, project.id, prNumber);
+      try {
+        const prStatus = await fetchPRStatus(project.path, prNumber);
+        state.updateTask(task.id, { prStatus });
+        broadcast('task:pr-status', { taskId: task.id, prStatus });
+      } catch { /* initial status fetch is best-effort */ }
+    }
 
     res.json({ prUrl });
   } catch (err) {
     res.status(500).json({ error: `PR creation failed: ${err.message}` });
+  }
+});
+
+// Merge a PR via GitHub (respects branch protections)
+router.post('/projects/:projectId/tasks/:taskId/merge-pr', async (req, res) => {
+  const project = state.getProject(req.params.projectId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const task = state.getTask(req.params.taskId);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  if (!task.prNumber) return res.status(400).json({ error: 'Task has no PR' });
+
+  const cwd = toWSLPath(project.path);
+  const strategy = req.body.strategy || 'merge';
+  const strategyFlag = strategy === 'squash' ? '--squash' : strategy === 'rebase' ? '--rebase' : '--merge';
+
+  try {
+    await execPromise('gh', [
+      'pr', 'merge', String(task.prNumber),
+      strategyFlag, '--delete-branch'
+    ], { cwd, timeout: 30000 });
+
+    state.updateTask(task.id, {
+      merged: true,
+      prStatus: { ...task.prStatus, state: 'MERGED', updatedAt: Date.now() },
+    });
+    untrackPR(task.id);
+    broadcast('task:updated', state.getTask(task.id));
+
+    res.json({ message: `PR #${task.prNumber} merged via ${strategy}` });
+  } catch (err) {
+    res.status(500).json({ error: `PR merge failed: ${err.message}` });
   }
 });
 
