@@ -82,6 +82,7 @@ export default function App() {
     search: '', efforts: [], statuses: [], modelId: '', hasPlan: false, dateFrom: '', dateTo: '',
   });
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkInFlight, setBulkInFlight] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [focusedCardIndex, setFocusedCardIndex] = useState(-1);
   const [replayResults, setReplayResults] = useState({});
@@ -967,24 +968,38 @@ export default function App() {
 
   // Bulk actions
   const handleBulkDismiss = async () => {
+    if (bulkInFlight) return;
     const ids = [...selectedIds].filter((id) => {
       const t = tasks.find((t2) => t2.id === id);
       return t && ['proposed', 'planned', 'planning', 'queued'].includes(t.status);
     });
+    if (ids.length === 0) return;
     setSelectedIds(new Set());
-    for (const id of ids) {
-      try { await api.dismissTask(id); } catch (err) { console.error(err); }
+    setBulkInFlight(true);
+    try {
+      await api.batchAction('dismiss', ids);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBulkInFlight(false);
     }
   };
 
   const handleBulkPlan = async (modelId) => {
+    if (bulkInFlight) return;
     const ids = [...selectedIds].filter((id) => {
       const t = tasks.find((t2) => t2.id === id);
       return t && t.status === 'proposed';
     });
+    if (ids.length === 0) return;
     setSelectedIds(new Set());
-    for (const id of ids) {
-      try { await api.planTask(id, modelId); } catch (err) { console.error(err); }
+    setBulkInFlight(true);
+    try {
+      await api.batchAction('plan', ids, modelId);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBulkInFlight(false);
     }
   };
 
@@ -1315,6 +1330,7 @@ export default function App() {
                 onChangeEffort={handleBulkEffort}
                 onClearSelection={handleClearSelection}
                 models={models}
+                disabled={bulkInFlight}
               />
             )}
           </ErrorBoundary>
