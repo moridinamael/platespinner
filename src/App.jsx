@@ -11,6 +11,7 @@ import PlatesSpinning from './components/PlatesSpinning.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import AnalyticsDashboard from './components/AnalyticsDashboard.jsx';
+import SkillEditor from './components/SkillEditor.jsx';
 import { matchesFilters } from './utils.js';
 
 export default function App() {
@@ -86,6 +87,8 @@ export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [focusedCardIndex, setFocusedCardIndex] = useState(-1);
   const [replayResults, setReplayResults] = useState({});
+  const [showSkillEditor, setShowSkillEditor] = useState(false);
+  const [editingSkill, setEditingSkill] = useState(null);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId),
@@ -660,6 +663,27 @@ export default function App() {
       setStatusMessage(`Error: ${err.message}`);
       setTimeout(() => setStatusMessage(null), 3000);
     }
+  }, []);
+
+  const handleOpenSkillEditor = useCallback((sk = null) => {
+    setEditingSkill(sk);
+    setShowSkillEditor(true);
+  }, []);
+
+  const handleSaveSkill = useCallback(async ({ id, name, content }) => {
+    if (id) {
+      const updated = await api.updateTemplate(id, { name, content });
+      setTemplates(prev => prev.map(t => t.id === id ? { ...t, ...updated } : t));
+    } else {
+      const created = await api.createTemplate({ name, content });
+      setTemplates(prev => [...prev, created]);
+      setSelectedTemplateId(created.id);
+    }
+  }, []);
+
+  const handleImportSkills = useCallback(async (skillsArr) => {
+    const results = await api.importSkills(skillsArr);
+    setTemplates(prev => [...prev, ...results]);
   }, []);
 
   const handlePlan = useCallback(async (taskId, modelId) => {
@@ -1259,6 +1283,7 @@ export default function App() {
           onSelectTemplate={setSelectedTemplateId}
           onCreateTemplate={handleCreateTemplate}
           onDeleteTemplate={handleDeleteTemplate}
+          onOpenSkillEditor={handleOpenSkillEditor}
           models={models}
         />
         {hasActiveAgents && (
@@ -1399,6 +1424,17 @@ export default function App() {
           onExecute={handleExecute}
           onDismiss={handleDismiss}
           onClose={() => setCommandPaletteOpen(false)}
+        />
+      )}
+      {showSkillEditor && (
+        <SkillEditor
+          skill={editingSkill}
+          skills={templates}
+          project={projects.find(p => p.id === selectedProjectId)}
+          onSave={handleSaveSkill}
+          onClose={() => setShowSkillEditor(false)}
+          onDelete={handleDeleteTemplate}
+          onImport={handleImportSkills}
         />
       )}
     </div>

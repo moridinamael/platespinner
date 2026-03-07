@@ -20,6 +20,7 @@ function GenerateBar({
   onSelectTemplate,
   onCreateTemplate,
   onDeleteTemplate,
+  onOpenSkillEditor,
   models,
 }) {
   const [now, setNow] = useState(Date.now());
@@ -133,6 +134,16 @@ Do NOT make any code changes. Only propose tasks as structured JSON above.`;
         </select>
 
         <div className="template-actions">
+          <button
+            className="btn btn-edit-skill"
+            onClick={() => {
+              const selected = templates.find(t => t.id === selectedTemplateId);
+              onOpenSkillEditor(selected || null);
+            }}
+            title="Open Skill Editor"
+          >
+            Edit
+          </button>
           <button
             className="btn btn-add-template"
             onClick={() => setShowForm(!showForm)}

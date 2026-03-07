@@ -496,6 +496,15 @@ export function getPromptTemplate(id) {
   return promptTemplates.get(id);
 }
 
+export function updatePromptTemplate(id, updates) {
+  const existing = promptTemplates.get(id);
+  if (!existing) return null;
+  const updated = { ...existing, ...updates, id };
+  promptTemplates.set(id, updated);
+  save();
+  return updated;
+}
+
 export function removePromptTemplate(id) {
   const result = promptTemplates.delete(id);
   save();
