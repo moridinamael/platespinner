@@ -39,8 +39,8 @@ function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecut
       }
     }
     // Sort proposed and plan columns by sortOrder
-    map['proposed'].sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
-    map['plan'].sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
+    map['proposed'] = [...map['proposed']].sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
+    map['plan'] = [...map['plan']].sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
     return map;
   }, [tasks]);
 

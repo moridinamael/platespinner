@@ -171,11 +171,17 @@ export default function App() {
     }).catch(err => showToast('Failed to load tasks: ' + err.message, 'error', 5000));
     // Hydrate queue positions from server
     api.getQueues().then((queues) => {
-      // queues is { projectId: [{ taskId, position }], ... }
+      // Build Map<projectId, Map<taskId, entry>> for O(1) lookups
+      const queueMap = {};
+      for (const [projectId, entries] of Object.entries(queues)) {
+        const m = new Map();
+        for (const entry of entries) m.set(entry.taskId, entry);
+        queueMap[projectId] = m;
+      }
       setTasks((prev) => prev.map((t) => {
-        const projectQueue = queues[t.projectId];
+        const projectQueue = queueMap[t.projectId];
         if (!projectQueue) return t;
-        const entry = projectQueue.find((q) => q.taskId === t.id);
+        const entry = projectQueue.get(t.id);
         if (entry) return { ...t, queuePosition: entry.position };
         return t;
       }));
@@ -404,10 +410,11 @@ export default function App() {
           })
         );
         break;
-      case 'execution:queue-updated':
+      case 'execution:queue-updated': {
+        const queueMap = new Map(data.queue.map((q) => [q.taskId, q]));
         setTasks((prev) => prev.map((t) => {
           if (t.projectId !== data.projectId) return t;
-          const entry = data.queue.find((q) => q.taskId === t.id);
+          const entry = queueMap.get(t.id);
           if (entry) return { ...t, queuePosition: entry.position };
           // Clear stale queuePosition for tasks no longer in queue
           if (t.queuePosition !== undefined) {
@@ -417,6 +424,7 @@ export default function App() {
           return t;
         }));
         break;
+      }
       case 'execution:file-conflicts':
         showToast(`Warning: Task may conflict with ${data.conflicts.length} other task(s) on shared files`, 'info', 8000);
         break;
