@@ -1,16 +1,7 @@
 import { execFile } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
-import { homedir } from 'os';
 import { join } from 'path';
-import { toWSLPath } from './paths.js';
-
-const HOME = homedir();
-const EXTRA_PATH_DIRS = [
-  `${HOME}/go/bin`,
-  `${HOME}/.cargo/bin`,
-  `${HOME}/.local/bin`,
-  `${HOME}/.npm-global/bin`,
-].join(':');
+import { toWSLPath, EXTRA_PATH_DIRS } from './paths.js';
 
 /**
  * Detect which test framework a project uses.
