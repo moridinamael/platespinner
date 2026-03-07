@@ -43,13 +43,13 @@ describe('Execution Queue', () => {
   // --- enqueueTask ---
 
   describe('enqueueTask', () => {
-    it('enqueues a single task and returns queue length 1', () => {
+    it('enqueues a single task and returns position 1', () => {
       const len = state.enqueueTask(project.id, taskA.id);
       expect(len).toBe(1);
       expect(state.getQueue(project.id)).toEqual([taskA.id]);
     });
 
-    it('enqueues multiple tasks in sortOrder', () => {
+    it('enqueues multiple tasks in sortOrder and returns inserted position', () => {
       state.enqueueTask(project.id, taskA.id);
       const len = state.enqueueTask(project.id, taskB.id);
       expect(len).toBe(2);
@@ -63,7 +63,7 @@ describe('Execution Queue', () => {
       expect(state.getTask(taskB.id).queuePosition).toBe(2);
     });
 
-    it('is idempotent — enqueuing the same task twice does not duplicate', () => {
+    it('is idempotent — re-enqueue returns existing position without duplicating', () => {
       state.enqueueTask(project.id, taskA.id);
       const len = state.enqueueTask(project.id, taskA.id);
       expect(len).toBe(1);
@@ -77,6 +77,34 @@ describe('Execution Queue', () => {
       expect(state.getQueue(project.id)).toEqual([taskA.id, taskC.id]);
       expect(state.getTask(taskA.id).queuePosition).toBe(1);
       expect(state.getTask(taskC.id).queuePosition).toBe(2);
+    });
+
+    it('returns the inserted position, not queue length, for priority insertion', () => {
+      state.enqueueTask(project.id, taskC.id); // sortOrder 300 → position 1
+      const pos = state.enqueueTask(project.id, taskA.id); // sortOrder 100 → inserts at front
+      expect(pos).toBe(1); // actual position, NOT queue length 2
+      expect(state.getTask(taskA.id).queuePosition).toBe(1);
+      expect(state.getTask(taskC.id).queuePosition).toBe(2);
+    });
+
+    it('returns correct position for mid-queue insertion by sortOrder', () => {
+      state.enqueueTask(project.id, taskA.id); // sortOrder 100 → position 1
+      state.enqueueTask(project.id, taskC.id); // sortOrder 300 → position 2
+      const pos = state.enqueueTask(project.id, taskB.id); // sortOrder 200 → inserts between A and C
+      expect(pos).toBe(2); // position 2, not queue length 3
+      expect(state.getQueue(project.id)).toEqual([taskA.id, taskB.id, taskC.id]);
+      expect(state.getTask(taskA.id).queuePosition).toBe(1);
+      expect(state.getTask(taskB.id).queuePosition).toBe(2);
+      expect(state.getTask(taskC.id).queuePosition).toBe(3);
+    });
+
+    it('returns correct position when idempotently re-enqueuing a mid-queue task', () => {
+      state.enqueueTask(project.id, taskA.id);
+      state.enqueueTask(project.id, taskB.id);
+      state.enqueueTask(project.id, taskC.id);
+      // Re-enqueue taskB (already at position 2)
+      const pos = state.enqueueTask(project.id, taskB.id);
+      expect(pos).toBe(2); // stays at position 2, not queue length 3
     });
   });
 

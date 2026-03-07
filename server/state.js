@@ -451,7 +451,7 @@ export function enqueueTask(projectId, taskId) {
   }
   _reindexQueuePositions(projectId);
   save();
-  return queue.length;
+  return tasks.get(taskId)?.queuePosition ?? (queue.indexOf(taskId) + 1);
 }
 
 export function dequeueTask(projectId) {
