@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'fs';
 
+const mockFileHandle = {
+  writeFile: vi.fn(async () => {}),
+  sync: vi.fn(async () => {}),
+  close: vi.fn(async () => {}),
+};
+
 // Mock fs modules before importing state (prevents load() from touching disk)
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal();
@@ -9,6 +15,11 @@ vi.mock('fs', async (importOriginal) => {
     readFileSync: vi.fn(() => { throw new Error('ENOENT'); }),
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
+    renameSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    openSync: vi.fn(() => 99),
+    fsyncSync: vi.fn(),
+    closeSync: vi.fn(),
   };
 });
 
@@ -16,8 +27,10 @@ vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    writeFile: vi.fn(async () => {}),
+    open: vi.fn(async () => mockFileHandle),
     mkdir: vi.fn(async () => {}),
+    rename: vi.fn(async () => {}),
+    copyFile: vi.fn(async () => {}),
   };
 });
 
@@ -339,5 +352,90 @@ describe('crash recovery — mixed scenario', () => {
 
     // Execution queues cleared
     expect(state.getAllQueues()).toEqual({});
+  });
+});
+
+// --- Corrupt primary — backup recovery ---
+
+describe('corrupt primary — backup recovery', () => {
+  it('recovers from backup when primary contains invalid JSON', () => {
+    const proj = makeProject({ id: 'p1' });
+    const task = makeTask({ id: 't1', projectId: 'p1', status: 'proposed' });
+    const validBackup = makeState({ projects: [proj], tasks: [task] });
+
+    readFileSync
+      .mockReturnValueOnce('{{not valid json')
+      .mockReturnValueOnce(validBackup);
+
+    state.load();
+
+    expect(state.getProject('p1')).toBeDefined();
+    expect(state.getTask('t1')).toBeDefined();
+    expect(state.getTask('t1').status).toBe('proposed');
+  });
+
+  it('recovers from backup when primary is truncated', () => {
+    const proj = makeProject({ id: 'p1' });
+    const task = makeTask({ id: 't1', projectId: 'p1' });
+    const validBackup = makeState({ projects: [proj], tasks: [task] });
+
+    readFileSync
+      .mockReturnValueOnce('{"projects":[{"id":"p1"')  // truncated
+      .mockReturnValueOnce(validBackup);
+
+    state.load();
+
+    expect(state.getProject('p1')).toBeDefined();
+    expect(state.getTask('t1')).toBeDefined();
+  });
+
+  it('starts empty when both primary and backup are corrupt', () => {
+    readFileSync
+      .mockReturnValueOnce('corrupt primary')
+      .mockReturnValueOnce('corrupt backup too');
+
+    state.load();
+
+    expect(state.getProjects()).toEqual([]);
+    expect(state.getTasks()).toEqual([]);
+  });
+
+  it('starts empty when primary is corrupt and backup does not exist', () => {
+    readFileSync
+      .mockReturnValueOnce('corrupt primary')
+      .mockImplementationOnce(() => { throw new Error('ENOENT'); });
+
+    state.load();
+
+    expect(state.getProjects()).toEqual([]);
+    expect(state.getTasks()).toEqual([]);
+  });
+
+  it('loads from backup when primary does not exist but backup does', () => {
+    const proj = makeProject({ id: 'p1' });
+    const validBackup = makeState({ projects: [proj] });
+
+    readFileSync
+      .mockImplementationOnce(() => { throw new Error('ENOENT'); })  // primary missing
+      .mockReturnValueOnce(validBackup);  // backup exists
+
+    state.load();
+
+    expect(state.getProject('p1')).toBeDefined();
+  });
+
+  it('logs explicit corruption message for corrupt primary', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    readFileSync
+      .mockReturnValueOnce('not json')
+      .mockImplementationOnce(() => { throw new Error('ENOENT'); });
+
+    state.load();
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Corrupt primary state file')
+    );
+    consoleSpy.mockRestore();
   });
 });

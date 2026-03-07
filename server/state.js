@@ -1,12 +1,14 @@
 import { randomUUID } from 'crypto';
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { writeFile, mkdir } from 'fs/promises';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, copyFileSync, openSync, fsyncSync, closeSync } from 'fs';
+import { open, mkdir, rename, copyFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '..', 'data');
 const DATA_FILE = join(DATA_DIR, 'state.json');
+const BACKUP_FILE = join(DATA_DIR, 'state.backup.json');
+const TEMP_FILE = join(DATA_DIR, 'state.tmp.json');
 export const LOGS_DIR = join(DATA_DIR, 'logs');
 
 const projects = new Map();
@@ -68,13 +70,28 @@ async function _writeToDisk() {
   _writing = true;
   try {
     await mkdir(DATA_DIR, { recursive: true });
-    await writeFile(DATA_FILE, _serialize());
+    const data = _serialize();
+    // Write to temp file, fsync, then atomic rename
+    const fh = await open(TEMP_FILE, 'w');
+    try {
+      await fh.writeFile(data);
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
+    // Before replacing primary, copy current primary to backup (last-known-good)
+    try {
+      await copyFile(DATA_FILE, BACKUP_FILE);
+    } catch {
+      // No primary yet (first write) — skip backup
+    }
+    // Atomic rename: temp → primary
+    await rename(TEMP_FILE, DATA_FILE);
   } catch (err) {
     console.error('Failed to save state:', err.message);
     _dirty = true; // mark dirty again so next debounce retries
   } finally {
     _writing = false;
-    // If dirtied again during the write, schedule another
     if (_dirty && !_debounceTimer) {
       _debounceTimer = setTimeout(_writeToDisk, DEBOUNCE_MS);
     }
@@ -97,6 +114,88 @@ export async function flushState() {
   }
 }
 
+function _hydrateFromData(data) {
+  for (const p of data.projects || []) projects.set(p.id, p);
+  for (const t of data.tasks || []) tasks.set(t.id, t);
+  for (const pt of data.promptTemplates || []) promptTemplates.set(pt.id, pt);
+  if (data.notificationSettings) {
+    for (const [key, val] of Object.entries(data.notificationSettings)) {
+      notificationSettings.set(key, val);
+    }
+  }
+  if (data.executionQueues) {
+    for (const [projectId, queue] of Object.entries(data.executionQueues)) {
+      if (Array.isArray(queue) && queue.length > 0) {
+        executionQueues.set(projectId, queue);
+      }
+    }
+  }
+  // Restore autoclicker config (but never auto-resume running)
+  if (data.autoclicker) {
+    autoclickerConfig.enabled = !!data.autoclicker.enabled;
+    autoclickerConfig.enabledProjects = new Set(data.autoclicker.enabledProjects || []);
+    autoclickerConfig.maxParallel = data.autoclicker.maxParallel || 3;
+    autoclickerConfig.standoffSeconds = data.autoclicker.standoffSeconds || 0;
+    autoclickerConfig.running = false; // Never auto-resume
+  }
+  // Restore autoclicker audit log
+  if (Array.isArray(data.autoclickerAuditLog)) {
+    autoclickerAuditLog.length = 0;
+    autoclickerAuditLog.push(...data.autoclickerAuditLog);
+  }
+  // Backfill sortOrder for existing projects missing it
+  let needsSortBackfill = false;
+  for (const p of projects.values()) {
+    if (p.sortOrder == null) { needsSortBackfill = true; break; }
+  }
+  if (needsSortBackfill) {
+    let idx = 0;
+    for (const p of projects.values()) {
+      if (p.sortOrder == null) p.sortOrder = idx;
+      idx++;
+    }
+  }
+  // Backfill sortOrder for existing tasks missing it
+  let needsTaskSortBackfill = false;
+  for (const t of tasks.values()) {
+    if (t.sortOrder == null) { needsTaskSortBackfill = true; break; }
+  }
+  if (needsTaskSortBackfill) {
+    let idx = 0;
+    for (const t of tasks.values()) {
+      if (t.sortOrder == null) t.sortOrder = t.createdAt || idx;
+      idx++;
+    }
+  }
+  // Backfill dependencies for existing tasks missing it
+  for (const t of tasks.values()) {
+    if (!t.dependencies) t.dependencies = [];
+  }
+}
+
+function _recoverTransientTasks() {
+  let recovered = 0;
+  for (const t of tasks.values()) {
+    if (t.status === 'executing') {
+      t.status = t.plan ? 'planned' : 'proposed';
+      t.agentLog = (t.agentLog ? t.agentLog + '\n' : '') + '[Server restarted — execution was interrupted]';
+      recovered++;
+    } else if (t.status === 'planning') {
+      t.status = 'proposed';
+      recovered++;
+    } else if (t.status === 'queued') {
+      t.status = t.plan ? 'planned' : 'proposed';
+      t.agentLog = (t.agentLog ? t.agentLog + '\n' : '') + '[Server restarted — task was dequeued]';
+      recovered++;
+    }
+  }
+  if (recovered > 0) {
+    executionQueues.clear();
+    console.log(`Recovered ${recovered} task(s) stuck in transient states`);
+    save();
+  }
+}
+
 export function load() {
   // Clear existing state so load() is safely re-callable (needed for tests)
   projects.clear();
@@ -105,96 +204,52 @@ export function load() {
   notificationSettings.clear();
   executionQueues.clear();
 
+  let raw;
+  let source = 'primary';
+
+  // Try primary file first
   try {
-    const raw = readFileSync(DATA_FILE, 'utf-8');
-    const data = JSON.parse(raw);
-    for (const p of data.projects || []) projects.set(p.id, p);
-    for (const t of data.tasks || []) tasks.set(t.id, t);
-    for (const pt of data.promptTemplates || []) promptTemplates.set(pt.id, pt);
-    if (data.notificationSettings) {
-      for (const [key, val] of Object.entries(data.notificationSettings)) {
-        notificationSettings.set(key, val);
-      }
-    }
-    if (data.executionQueues) {
-      for (const [projectId, queue] of Object.entries(data.executionQueues)) {
-        if (Array.isArray(queue) && queue.length > 0) {
-          executionQueues.set(projectId, queue);
-        }
-      }
-    }
-    // Restore autoclicker config (but never auto-resume running)
-    if (data.autoclicker) {
-      autoclickerConfig.enabled = !!data.autoclicker.enabled;
-      autoclickerConfig.enabledProjects = new Set(data.autoclicker.enabledProjects || []);
-      autoclickerConfig.maxParallel = data.autoclicker.maxParallel || 3;
-      autoclickerConfig.standoffSeconds = data.autoclicker.standoffSeconds || 0;
-      autoclickerConfig.running = false; // Never auto-resume
-    }
-
-    // Restore autoclicker audit log
-    if (Array.isArray(data.autoclickerAuditLog)) {
-      autoclickerAuditLog.length = 0;
-      autoclickerAuditLog.push(...data.autoclickerAuditLog);
-    }
-
-    // Backfill sortOrder for existing projects missing it
-    let needsSortBackfill = false;
-    for (const p of projects.values()) {
-      if (p.sortOrder == null) { needsSortBackfill = true; break; }
-    }
-    if (needsSortBackfill) {
-      let idx = 0;
-      for (const p of projects.values()) {
-        if (p.sortOrder == null) p.sortOrder = idx;
-        idx++;
-      }
-    }
-
-    // Backfill sortOrder for existing tasks missing it
-    let needsTaskSortBackfill = false;
-    for (const t of tasks.values()) {
-      if (t.sortOrder == null) { needsTaskSortBackfill = true; break; }
-    }
-    if (needsTaskSortBackfill) {
-      let idx = 0;
-      for (const t of tasks.values()) {
-        if (t.sortOrder == null) t.sortOrder = t.createdAt || idx;
-        idx++;
-      }
-    }
-
-    // Backfill dependencies for existing tasks missing it
-    for (const t of tasks.values()) {
-      if (!t.dependencies) t.dependencies = [];
-    }
-
-    console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from disk`);
-
-    // Recover tasks stuck in transient states from a previous server crash
-    let recovered = 0;
-    for (const t of tasks.values()) {
-      if (t.status === 'executing') {
-        t.status = t.plan ? 'planned' : 'proposed';
-        t.agentLog = (t.agentLog ? t.agentLog + '\n' : '') + '[Server restarted — execution was interrupted]';
-        recovered++;
-      } else if (t.status === 'planning') {
-        t.status = 'proposed';
-        recovered++;
-      } else if (t.status === 'queued') {
-        t.status = t.plan ? 'planned' : 'proposed';
-        t.agentLog = (t.agentLog ? t.agentLog + '\n' : '') + '[Server restarted — task was dequeued]';
-        recovered++;
-      }
-    }
-    if (recovered > 0) {
-      executionQueues.clear();
-      console.log(`Recovered ${recovered} task(s) stuck in transient states`);
-      save();
-    }
+    raw = readFileSync(DATA_FILE, 'utf-8');
   } catch {
-    // No file yet or corrupt — start fresh
+    // Primary not found — try backup
+    try {
+      raw = readFileSync(BACKUP_FILE, 'utf-8');
+      source = 'backup';
+      console.warn('Primary state file not found, loading from backup');
+    } catch {
+      // Neither exists — fresh start
+      return;
+    }
   }
+
+  // Try to parse whichever file we read
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (parseErr) {
+    if (source === 'primary') {
+      console.error(`Corrupt primary state file (${DATA_FILE}): ${parseErr.message}`);
+      // Try backup
+      try {
+        const backupRaw = readFileSync(BACKUP_FILE, 'utf-8');
+        data = JSON.parse(backupRaw);
+        source = 'backup';
+        console.warn('Recovered state from backup file');
+      } catch (backupErr) {
+        console.error(`Backup state file also unusable: ${backupErr.message}`);
+        console.error('Starting with empty state — data may have been lost');
+        return;
+      }
+    } else {
+      console.error(`Corrupt backup state file (${BACKUP_FILE}): ${parseErr.message}`);
+      console.error('Starting with empty state — data may have been lost');
+      return;
+    }
+  }
+
+  _hydrateFromData(data);
+  console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from ${source}`);
+  _recoverTransientTasks();
 }
 
 load();
@@ -802,7 +857,17 @@ process.on('exit', () => {
   if (_dirty) {
     try {
       mkdirSync(DATA_DIR, { recursive: true });
-      writeFileSync(DATA_FILE, _serialize());
+      const data = _serialize();
+      writeFileSync(TEMP_FILE, data);
+      const fd = openSync(TEMP_FILE, 'r');
+      fsyncSync(fd);
+      closeSync(fd);
+      try {
+        copyFileSync(DATA_FILE, BACKUP_FILE);
+      } catch {
+        // No primary yet
+      }
+      renameSync(TEMP_FILE, DATA_FILE);
     } catch (err) {
       console.error('Failed to save state on exit:', err.message);
     }

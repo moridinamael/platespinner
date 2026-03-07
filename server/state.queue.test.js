@@ -8,6 +8,11 @@ vi.mock('fs', async (importOriginal) => {
     readFileSync: vi.fn(() => { throw new Error('ENOENT'); }),
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
+    renameSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    openSync: vi.fn(() => 99),
+    fsyncSync: vi.fn(),
+    closeSync: vi.fn(),
   };
 });
 
@@ -15,8 +20,14 @@ vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    writeFile: vi.fn(async () => {}),
+    open: vi.fn(async () => ({
+      writeFile: vi.fn(async () => {}),
+      sync: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    })),
     mkdir: vi.fn(async () => {}),
+    rename: vi.fn(async () => {}),
+    copyFile: vi.fn(async () => {}),
   };
 });
 
