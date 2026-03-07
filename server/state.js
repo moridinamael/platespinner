@@ -157,6 +157,11 @@ export function load() {
       }
     }
 
+    // Backfill dependencies for existing tasks missing it
+    for (const t of tasks.values()) {
+      if (!t.dependencies) t.dependencies = [];
+    }
+
     console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from disk`);
 
     // Recover tasks stuck in transient states from a previous server crash
@@ -256,6 +261,7 @@ export function addTask({ projectId, title, description, rationale, effort, gene
     lastTestOutput: null,
     createdAt: Date.now(),
     sortOrder: Date.now(),
+    dependencies: [],
   };
   tasks.set(id, task);
   save();
@@ -311,6 +317,12 @@ export function removeTask(id) {
   const task = tasks.get(id);
   if (task) {
     _removeFromQueueInternal(task.projectId, id);
+  }
+  // Clean up dependency references from other tasks
+  for (const t of tasks.values()) {
+    if (t.dependencies && t.dependencies.includes(id)) {
+      t.dependencies = t.dependencies.filter(d => d !== id);
+    }
   }
   const result = tasks.delete(id);
   save();
@@ -633,6 +645,49 @@ export function incrementConsecutiveFailures(projectId) {
 
 export function resetConsecutiveFailures(projectId) {
   autoclickerConsecutiveFailures.delete(projectId);
+}
+
+// --- Dependency Helpers ---
+
+export function getBlockers(taskId) {
+  const task = tasks.get(taskId);
+  if (!task || !task.dependencies || task.dependencies.length === 0) return [];
+  return task.dependencies.map(id => tasks.get(id)).filter(Boolean);
+}
+
+export function isTaskBlocked(taskId) {
+  const task = tasks.get(taskId);
+  if (!task || !task.dependencies || task.dependencies.length === 0) return false;
+  return task.dependencies.some(depId => {
+    const dep = tasks.get(depId);
+    return dep && dep.status !== 'done';
+  });
+}
+
+export function getUnblockedTasks(projectId) {
+  return getTasks(projectId).filter(t => !isTaskBlocked(t.id));
+}
+
+export function getDependents(taskId) {
+  return [...tasks.values()].filter(t =>
+    t.dependencies && t.dependencies.includes(taskId)
+  );
+}
+
+export function wouldCreateCycle(taskId, newDepId) {
+  const visited = new Set();
+  const stack = [newDepId];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === taskId) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    const t = tasks.get(current);
+    if (t && t.dependencies) {
+      for (const dep of t.dependencies) stack.push(dep);
+    }
+  }
+  return false;
 }
 
 // --- Graceful shutdown: flush pending state ---

@@ -13,7 +13,7 @@ const ActivitySpinner = ({ variant }) => (
   </svg>
 );
 
-function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, isFocused, onRetry }) {
+function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, isFocused, onRetry, isBlocked }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
@@ -57,7 +57,7 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
     <div
       ref={setNodeRef}
       style={style}
-      className={`card card-${task.status}${isSelected ? ' card-selected' : ''}${isFocused ? ' card-focused' : ''}${isDragging ? ' card-dragging' : ''}`}
+      className={`card card-${task.status}${isSelected ? ' card-selected' : ''}${isFocused ? ' card-focused' : ''}${isDragging ? ' card-dragging' : ''}${isBlocked ? ' card-blocked' : ''}`}
       {...attributes}
       {...listeners}
       onClick={(e) => {
@@ -82,6 +82,9 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
         <span className="card-title">{task.title}</span>
         {isQueued && queuePosition && (
           <span className="queue-position-badge">#{queuePosition} in queue</span>
+        )}
+        {isBlocked && (
+          <span className="blocked-badge">Blocked</span>
         )}
         {(isProposed || isPlanned || isPlanning || isQueued || isFailed) && (
           <button
@@ -132,7 +135,12 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
         )}
 
         {isProposed && (
-          <button className="btn btn-sm btn-plan" onClick={(e) => { e.stopPropagation(); onPlan(task.id); }}>
+          <button
+            className="btn btn-sm btn-plan"
+            onClick={(e) => { e.stopPropagation(); onPlan(task.id); }}
+            disabled={isBlocked}
+            title={isBlocked ? 'Blocked by dependencies' : undefined}
+          >
             Plan<span className="shortcut-hint">P</span>
           </button>
         )}
@@ -147,7 +155,12 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
         )}
 
         {isPlanned && (
-          <button className="btn btn-sm btn-execute" onClick={(e) => { e.stopPropagation(); onExecute(task.id); }}>
+          <button
+            className="btn btn-sm btn-execute"
+            onClick={(e) => { e.stopPropagation(); onExecute(task.id); }}
+            disabled={isBlocked}
+            title={isBlocked ? 'Blocked by dependencies' : undefined}
+          >
             Execute<span className="shortcut-hint">E</span>
           </button>
         )}

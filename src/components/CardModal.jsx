@@ -3,6 +3,8 @@ import { useConfirm } from '../hooks/useConfirm.js';
 import { api } from '../api.js';
 import { getModelLabel, getModelProvider, formatCost, formatTokens, formatLogSize, escapeHtml } from '../utils.js';
 import DiffViewer from './DiffViewer.jsx';
+import DependencyEditor from './DependencyEditor.jsx';
+import DependencyGraph from './DependencyGraph.jsx';
 import AnsiToHtml from 'ansi-to-html';
 
 const ansiConverter = new AnsiToHtml({ fg: '#959ab0', bg: 'transparent', newline: true, escapeXML: true });
@@ -17,7 +19,7 @@ function formatEventType(type) {
   }
 }
 
-function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models, streamingLog, logStreamVersion, replayResult }) {
+function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models, streamingLog, logStreamVersion, replayResult, allTasks, blockedTaskIds }) {
   if (!task) return null;
 
   const isProposed = task.status === 'proposed';
@@ -63,6 +65,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const [draftRationale, setDraftRationale] = useState('');
   const [draftEffort, setDraftEffort] = useState('medium');
   const [draftPlan, setDraftPlan] = useState('');
+  const [draftDependencies, setDraftDependencies] = useState([]);
 
   // Reset state on task change
   useEffect(() => {
@@ -206,6 +209,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
     setDraftRationale(task.rationale || '');
     setDraftEffort(task.effort || 'medium');
     setDraftPlan(task.plan || '');
+    setDraftDependencies(task.dependencies || []);
     setEditing(true);
   };
 
@@ -219,6 +223,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
       description: draftDescription,
       rationale: draftRationale,
       effort: draftEffort,
+      dependencies: draftDependencies,
     };
     if (isPlanned && task.plan != null) {
       updates.plan = draftPlan;
@@ -239,6 +244,14 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const legacyLabel = !task.generatedBy && !task.executedBy && task.agentType
     ? task.agentType.charAt(0).toUpperCase() + task.agentType.slice(1)
     : null;
+
+  const isBlocked = blockedTaskIds?.has(task.id);
+
+  // Compute dependents: tasks that depend on this task
+  const dependents = useMemo(() => {
+    if (!allTasks || !task) return [];
+    return allTasks.filter(t => t.dependencies && t.dependencies.includes(task.id));
+  }, [allTasks, task]);
 
   // Show tabs when: done (details/changes/logs), or active (details/logs), or any task has logs
   const showTabs = isDone || isActive || isPlanned || isProposed;
@@ -303,6 +316,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
             </span>
           )}
           <span className="modal-status">{task.status}</span>
+          {isBlocked && <span className="blocked-badge">Blocked</span>}
           {isDone && task.commitHash && (
             <span className="commit-hash">{task.commitHash.slice(0, 7)}</span>
           )}
@@ -380,6 +394,63 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
                 ) : (
                   <p>{task.rationale}</p>
                 )}
+              </div>
+            )}
+
+            <div className="modal-section">
+              <h3>Dependencies {isBlocked && <span className="blocked-badge">Blocked</span>}</h3>
+              {editing ? (
+                <DependencyEditor
+                  task={task}
+                  allTasks={allTasks || []}
+                  dependencies={draftDependencies}
+                  onChange={setDraftDependencies}
+                />
+              ) : (
+                <>
+                  {task.dependencies?.length > 0 ? (
+                    <div className="dependency-list">
+                      {task.dependencies.map(depId => {
+                        const dep = (allTasks || []).find(t => t.id === depId);
+                        return dep ? (
+                          <div key={depId} className={`dependency-item dependency-${dep.status}`}>
+                            <span className={`dependency-status-dot status-${dep.status}`} />
+                            <span className="dependency-title">{dep.title}</span>
+                            <span className="dependency-status">{dep.status}</span>
+                          </div>
+                        ) : (
+                          <div key={depId} className="dependency-item dependency-missing">
+                            <span className="dependency-title">Unknown task ({depId.slice(0,8)})</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-muted">No dependencies</p>
+                  )}
+                  {dependents.length > 0 && (
+                    <div className="dependents-section">
+                      <h4>Depended on by</h4>
+                      {dependents.map(t => (
+                        <div key={t.id} className="dependency-item">
+                          <span className={`dependency-status-dot status-${t.status}`} />
+                          <span className="dependency-title">{t.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Dependency graph for tasks with deps or dependents */}
+            {!editing && ((task.dependencies?.length > 0) || dependents.length > 0) && (
+              <div className="modal-section">
+                <h3>Dependency Graph</h3>
+                <DependencyGraph
+                  tasks={allTasks || []}
+                  focusTaskId={task.id}
+                />
               </div>
             )}
 

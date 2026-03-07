@@ -57,37 +57,43 @@ async function branchExists(cwd, branchName) {
 }
 
 function advanceQueue(projectId) {
-  let nextTaskId;
-  while ((nextTaskId = state.dequeueTask(projectId))) {
-    const nextTask = state.getTask(nextTaskId);
-    if (nextTask && nextTask.status === 'queued') {
-      broadcast('execution:queue-advanced', {
-        projectId,
-        startedTaskId: nextTaskId,
-        queue: state.getQueue(projectId),
-      });
-      broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
-      runExecution(nextTask, nextTask.executedBy).catch((advanceErr) => {
-        console.error('Queue auto-advance failed:', advanceErr.message);
-        const staleTask = state.getTask(nextTaskId);
-        if (staleTask && staleTask.status === 'queued') {
-          state.updateTask(nextTaskId, {
-            status: staleTask.plan ? 'planned' : 'proposed',
-            agentLog: `Auto-advance failed: ${advanceErr.message}`,
-          });
-          broadcast('execution:failed', {
-            taskId: nextTaskId,
-            error: `Auto-advance failed: ${advanceErr.message}`,
-            aborted: false,
-            status: staleTask.plan ? 'planned' : 'proposed',
-          });
-        }
-      });
-      return;
-    }
-    // Task was dismissed/deleted or status changed — skip it, try next
+  const queue = state.getQueue(projectId);
+
+  // Find the first unblocked, valid task in the queue
+  for (let i = 0; i < queue.length; i++) {
+    const candidateId = queue[i];
+    const candidate = state.getTask(candidateId);
+    if (!candidate || candidate.status !== 'queued') continue;
+    if (state.isTaskBlocked(candidateId)) continue;
+
+    // Found an unblocked task — remove it from queue and execute
+    state.removeFromQueue(projectId, candidateId);
+    broadcast('execution:queue-advanced', {
+      projectId,
+      startedTaskId: candidateId,
+      queue: state.getQueue(projectId),
+    });
+    broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
+    runExecution(candidate, candidate.executedBy).catch((advanceErr) => {
+      console.error('Queue auto-advance failed:', advanceErr.message);
+      const staleTask = state.getTask(candidateId);
+      if (staleTask && staleTask.status === 'queued') {
+        state.updateTask(candidateId, {
+          status: staleTask.plan ? 'planned' : 'proposed',
+          agentLog: `Auto-advance failed: ${advanceErr.message}`,
+        });
+        broadcast('execution:failed', {
+          taskId: candidateId,
+          error: `Auto-advance failed: ${advanceErr.message}`,
+          aborted: false,
+          status: staleTask.plan ? 'planned' : 'proposed',
+        });
+      }
+    });
+    return;
   }
-  // Queue is empty — broadcast so clients clear stale state
+
+  // Queue is empty or all tasks are blocked — broadcast so clients clear stale state
   broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
 }
 
@@ -591,6 +597,14 @@ export async function runExecution(task, modelId) {
     // Exclude diff from broadcast to avoid large WebSocket payloads
     const { diff: _diff, ...broadcastUpdates } = updates;
     broadcast('execution:completed', { taskId: task.id, ...broadcastUpdates, result, costUsd: executionCost });
+
+    // Notify dependents that they may now be unblocked
+    const dependents = state.getDependents(task.id);
+    if (dependents.length > 0) {
+      for (const dep of dependents) {
+        broadcast('task:updated', { ...dep, _blocked: state.isTaskBlocked(dep.id) });
+      }
+    }
 
     // Run task validators
     try {

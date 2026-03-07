@@ -863,6 +863,20 @@ export default function App() {
     [projectTasks, filters]
   );
 
+  const blockedTaskIds = useMemo(() => {
+    const blocked = new Set();
+    for (const task of tasks) {
+      if (task.dependencies && task.dependencies.length > 0) {
+        const allDepsDone = task.dependencies.every(depId => {
+          const dep = tasks.find(t => t.id === depId);
+          return dep && dep.status === 'done';
+        });
+        if (!allDepsDone) blocked.add(task.id);
+      }
+    }
+    return blocked;
+  }, [tasks]);
+
   const handlePlanAll = useCallback(async () => {
     const proposedIds = filteredTasks
       .filter(t => t.status === 'proposed')
@@ -1248,6 +1262,7 @@ export default function App() {
               onReorderTasks={handleReorderTasks}
               onMoveTask={handleMoveTask}
               onRetry={handleRetry}
+              blockedTaskIds={blockedTaskIds}
             />
             {selectedIds.size > 0 && (
               <BulkActionBar
@@ -1294,6 +1309,8 @@ export default function App() {
           streamingLog={selectedTask ? (logBufferRef.current[selectedTask.id] || '') : ''}
           logStreamVersion={logStreamVersion}
           replayResult={selectedTask ? replayResults[selectedTask.id] : null}
+          allTasks={tasks}
+          blockedTaskIds={blockedTaskIds}
         />
       </ErrorBoundary>
       <PlatesSpinning

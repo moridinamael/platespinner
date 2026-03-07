@@ -3553,3 +3553,144 @@ html, body {
   font-size: 13px;
   font-weight: 600;
 }
+
+/* --- Dependency & Blocked styles --- */
+
+.blocked-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.15);
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.card.card-blocked {
+  opacity: 0.7;
+}
+
+.card.card-blocked .btn-plan,
+.card.card-blocked .btn-execute {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.dependency-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dependency-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--bg-card);
+}
+
+.dependency-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dependency-status-dot.status-done { background: var(--green); }
+.dependency-status-dot.status-proposed { background: var(--text-dim); }
+.dependency-status-dot.status-planned { background: var(--blue); }
+.dependency-status-dot.status-planning { background: var(--blue); }
+.dependency-status-dot.status-executing { background: var(--yellow); }
+.dependency-status-dot.status-queued { background: var(--text-dim); }
+.dependency-status-dot.status-failed { background: var(--red); }
+
+.dependency-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dependency-status {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: capitalize;
+}
+
+.dependents-section {
+  margin-top: 12px;
+}
+
+.dependents-section h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin: 0 0 6px;
+}
+
+/* Dependency editor */
+
+.dependency-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dependency-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dependency-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.dependency-chip-title {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dependency-chip-remove {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.dependency-chip-remove:hover {
+  color: var(--red);
+}
+
+.dependency-select {
+  font-size: 12px;
+  max-width: 300px;
+}
+
+/* Dependency graph */
+
+.dependency-graph-container {
+  overflow-x: auto;
+  padding: 4px 0;
+}
+
+.dependency-graph {
+  display: block;
+}

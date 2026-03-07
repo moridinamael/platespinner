@@ -25,13 +25,15 @@ Choose this when:
 - There are proposed tasks that haven't been planned yet
 - Pick the task that provides the most value with the least risk
 - Prefer tasks that build on recent successful work
+- Avoid planning tasks that are blocked — prefer unblocked tasks first
 
 ### Action: `execute`
 Choose this when:
 - There are planned (or proposed) tasks ready for execution
 - Pick the task that is most ready for implementation
 - Prefer planned tasks over proposed ones (they have more detail)
-- Consider dependencies: don't execute a task that depends on an unfinished one
+- **IMPORTANT: Never execute a task whose `blocked` field is `true`** — its dependencies haven't completed yet. Only execute unblocked tasks.
+- When multiple unblocked tasks are available, prefer ones whose completed dependencies provide useful context
 
 ### Handling Failed Tasks
 - Tasks with status `failed` have been executed but broke existing tests. Their commits were automatically reverted.
@@ -43,6 +45,7 @@ Choose this when:
 ### Action: `skip`
 Choose this when:
 - All actionable tasks are currently in progress (executing/planning) and you cannot propose or plan anything new right now
+- All unblocked tasks are in progress and remaining tasks are blocked waiting on dependencies
 - You need more information before acting
 
 Note: If all tasks are done, you should `propose` new work — not skip. Skip is only for when you're genuinely blocked waiting on in-progress work.

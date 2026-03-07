@@ -93,7 +93,10 @@ async function _runJudgmentAgent(project, tasks, templates, gitLog, testResult) 
 async function _runProjectCycle(project) {
   activeProcessCount++;
   try {
-    const tasks = state.getTasks(project.id);
+    const tasks = state.getTasks(project.id).map(t => ({
+      ...t,
+      _blocked: state.isTaskBlocked(t.id),
+    }));
     const templates = [...getBuiltInTemplates(), ...state.getPromptTemplates()];
     const gitLog = await _getGitLog(project.path);
     const testResult = project.lastTestResult;

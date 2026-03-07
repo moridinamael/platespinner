@@ -3,7 +3,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import Card from './Card.jsx';
 
-function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive, columnKey, onPlanAll, onExecuteAll, focusedTaskId, onRetry }) {
+function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive, columnKey, onPlanAll, onExecuteAll, focusedTaskId, onRetry, blockedTaskIds }) {
   const executingTasks = tasks.filter(t => t.status !== 'queued');
   const queuedTasks = tasks.filter(t => t.status === 'queued')
     .sort((a, b) => (a.queuePosition ?? Infinity) - (b.queuePosition ?? Infinity) || (a.createdAt || 0) - (b.createdAt || 0));
@@ -55,6 +55,7 @@ function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onEx
               onToggleSelect={onToggleSelect}
               isFocused={task.id === focusedTaskId}
               onRetry={onRetry}
+              isBlocked={blockedTaskIds?.has(task.id)}
             />
           ))}
           {hasQueuedSection && (
@@ -83,6 +84,7 @@ function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onEx
               onToggleSelect={onToggleSelect}
               isFocused={task.id === focusedTaskId}
               onRetry={onRetry}
+              isBlocked={blockedTaskIds?.has(task.id)}
             />
           ))}
           {tasks.length === 0 && (

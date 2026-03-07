@@ -173,6 +173,8 @@ export function buildJudgmentPrompt(project, tasks, templates, gitLog, testResul
     description: t.description?.slice(0, 200),
     plan: t.plan ? 'yes' : 'no',
     failureCount: t.failureCount || 0,
+    dependencies: t.dependencies || [],
+    blocked: t._blocked || false,
   }));
 
   const templatesSummary = templates.map(t => ({ id: t.id, name: t.name }));

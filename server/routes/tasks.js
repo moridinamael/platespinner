@@ -46,7 +46,7 @@ router.patch('/tasks/:id', (req, res) => {
     return res.status(400).json({ error: `Cannot edit task with status '${task.status}'` });
   }
 
-  const EDITABLE_FIELDS = ['title', 'description', 'rationale', 'effort', 'plan'];
+  const EDITABLE_FIELDS = ['title', 'description', 'rationale', 'effort', 'plan', 'dependencies'];
   const updates = {};
   for (const field of EDITABLE_FIELDS) {
     if (field in req.body) {
@@ -60,6 +60,27 @@ router.patch('/tasks/:id', (req, res) => {
 
   if (updates.effort && !['small', 'medium', 'large'].includes(updates.effort)) {
     return res.status(400).json({ error: 'effort must be small, medium, or large' });
+  }
+
+  if (updates.dependencies !== undefined) {
+    if (!Array.isArray(updates.dependencies)) {
+      return res.status(400).json({ error: 'dependencies must be an array of task IDs' });
+    }
+    for (const depId of updates.dependencies) {
+      if (depId === req.params.id) {
+        return res.status(400).json({ error: 'A task cannot depend on itself' });
+      }
+      const depTask = state.getTask(depId);
+      if (!depTask) {
+        return res.status(400).json({ error: `Dependency task ${depId} not found` });
+      }
+      if (depTask.projectId !== task.projectId) {
+        return res.status(400).json({ error: 'Cross-project dependencies are not allowed' });
+      }
+      if (state.wouldCreateCycle(req.params.id, depId)) {
+        return res.status(400).json({ error: `Adding dependency ${depId} would create a cycle` });
+      }
+    }
   }
 
   const updated = state.updateTask(req.params.id, updates);
@@ -105,6 +126,16 @@ router.post('/tasks/:id/plan', async (req, res) => {
     return res.status(400).json({ error: `Task is ${task.status}, not proposed or failed` });
   }
 
+  if (state.isTaskBlocked(task.id)) {
+    const blockers = state.getBlockers(task.id)
+      .filter(b => b.status !== 'done')
+      .map(b => b.title);
+    return res.status(400).json({
+      error: 'Task is blocked by unfinished dependencies',
+      blockers,
+    });
+  }
+
   const { modelId } = req.body || {};
 
   // Fire and forget — results come via WebSocket
@@ -122,6 +153,16 @@ router.post('/tasks/:id/execute', async (req, res) => {
   if (!task) return res.status(404).json({ error: 'Task not found' });
   if (task.status !== 'proposed' && task.status !== 'planned' && task.status !== 'failed') {
     return res.status(400).json({ error: `Task is ${task.status}, expected proposed, planned, or failed` });
+  }
+
+  if (state.isTaskBlocked(task.id)) {
+    const blockers = state.getBlockers(task.id)
+      .filter(b => b.status !== 'done')
+      .map(b => b.title);
+    return res.status(400).json({
+      error: 'Task is blocked by unfinished dependencies',
+      blockers,
+    });
   }
 
   const { modelId } = req.body || {};
@@ -415,6 +456,19 @@ router.post('/tasks/:id/replay/:phase', async (req, res) => {
   }
 });
 
+// --- Dependency info endpoint ---
+
+router.get('/tasks/:id/dependencies', (req, res) => {
+  const task = state.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  const dependencies = state.getBlockers(task.id);
+  const dependents = state.getDependents(task.id);
+  const blocked = state.isTaskBlocked(task.id);
+
+  res.json({ dependencies, dependents, blocked });
+});
+
 // --- Batch operations ---
 
 router.post('/tasks/batch', async (req, res) => {
@@ -466,8 +520,15 @@ router.post('/tasks/batch', async (req, res) => {
 
     let queued = 0;
     let started = 0;
+    let skippedBlocked = 0;
 
     for (const task of validTasks) {
+      // Skip blocked tasks
+      if (state.isTaskBlocked(task.id)) {
+        skippedBlocked++;
+        continue;
+      }
+
       // Budget check
       const project = state.getProject(task.projectId);
       if (project && project.budgetLimitUsd != null) {
@@ -489,7 +550,7 @@ router.post('/tasks/batch', async (req, res) => {
       }
     }
 
-    res.json({ message: 'Batch execution started', count: validTasks.length, started, queued });
+    res.json({ message: 'Batch execution started', count: validTasks.length, started, queued, skippedBlocked });
   } else if (action === 'dismiss') {
     let count = 0;
     for (const id of taskIds) {
