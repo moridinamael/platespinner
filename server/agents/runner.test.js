@@ -123,6 +123,11 @@ import { registerAgent, unregisterAgent } from '../census.js';
 import { getModel, estimateCost } from '../models.js';
 import { runTests } from '../testing.js';
 import { runGeneration, runPlanning, runExecution, spawnAgent, extractCostData } from './runner.js';
+import { writeReplayEvent, compressReplayLog } from './replay.js';
+import { emitNotification, checkAllTasksDone } from '../notifications.js';
+import { runPostPlanningHooks, runTaskValidators } from '../plugins/manager.js';
+import { findSimilarTasks, extractFilePaths, findFileConflicts } from '../similarity.js';
+import { createWriteStream } from 'fs';
 
 // ─── Helpers ───
 
@@ -384,6 +389,47 @@ describe('runGeneration', () => {
 
     expect(unregisterAgent).toHaveBeenCalledWith('agent-id-1');
   });
+
+  it('records replay events for prompt, response, and parsed output', async () => {
+    await runGeneration(project);
+
+    const replayTypes = writeReplayEvent.mock.calls.map(c => c[2].type);
+    expect(replayTypes).toContain('prompt_sent');
+    expect(replayTypes).toContain('response_received');
+    expect(replayTypes).toContain('parsed_output');
+  });
+
+  it('compresses replay log in finally block', async () => {
+    await runGeneration(project);
+
+    expect(compressReplayLog).toHaveBeenCalledWith(project.id, 'generation');
+  });
+
+  it('compresses replay log even on failure', async () => {
+    spawn.mockReturnValue(createMockProcess(1, '', 'fail'));
+
+    await expect(runGeneration(project)).rejects.toThrow();
+
+    expect(compressReplayLog).toHaveBeenCalledWith(project.id, 'generation');
+  });
+
+  it('uses promptContent over templateId when provided', async () => {
+    await runGeneration(project, 'template-1', 'test-model', 'custom prompt content');
+
+    expect(buildGenerationPrompt).toHaveBeenCalledWith(project.path, 'custom prompt content');
+  });
+
+  it('detects similar tasks and broadcasts duplicates-found', async () => {
+    findSimilarTasks.mockReturnValue([
+      { taskId: 'existing-1', title: 'Similar', score: 0.85, status: 'proposed' },
+    ]);
+
+    await runGeneration(project);
+
+    const dupCall = broadcast.mock.calls.find(c => c[0] === 'generation:duplicates-found');
+    expect(dupCall).toBeDefined();
+    expect(dupCall[1].duplicates).toHaveLength(1);
+  });
 });
 
 describe('runPlanning', () => {
@@ -483,6 +529,31 @@ describe('runPlanning', () => {
 
     // The task should not exist (was removed), and no crash
     expect(state.getTask(task.id)).toBeUndefined();
+  });
+
+  it('runs post-planning hooks after successful planning', async () => {
+    await runPlanning(task, 'test-model');
+
+    expect(runPostPlanningHooks).toHaveBeenCalledWith(
+      task,
+      expect.any(String),
+      expect.objectContaining({ id: project.id })
+    );
+  });
+
+  it('broadcasts planning:progress with bytesReceived', async () => {
+    await runPlanning(task, 'test-model');
+
+    const progressCalls = broadcast.mock.calls.filter(c => c[0] === 'planning:progress');
+    expect(progressCalls.length).toBeGreaterThanOrEqual(1);
+    expect(progressCalls[0][1]).toHaveProperty('bytesReceived');
+    expect(progressCalls[0][1].taskId).toBe(task.id);
+  });
+
+  it('compresses replay log in finally block', async () => {
+    await runPlanning(task, 'test-model');
+
+    expect(compressReplayLog).toHaveBeenCalledWith(task.id, 'planning');
   });
 });
 
@@ -699,6 +770,223 @@ describe('runExecution', () => {
       // advanceQueue is called in finally; it broadcasts queue-updated
       const queueCalls = broadcast.mock.calls.filter(c => c[0] === 'execution:queue-updated');
       expect(queueCalls.length).toBeGreaterThan(0);
+    });
+
+    it('picks next unblocked task from queue', async () => {
+      const task2 = state.addTask({ projectId: project.id, title: 'Next Queued' });
+      state.updateTask(task2.id, { status: 'queued' });
+      state.enqueueTask(project.id, task2.id);
+
+      await runExecution(task, 'test-model');
+
+      const advancedCall = broadcast.mock.calls.find(c => c[0] === 'execution:queue-advanced');
+      expect(advancedCall).toBeDefined();
+      expect(advancedCall[1].startedTaskId).toBe(task2.id);
+    });
+  });
+
+  describe('notifications', () => {
+    it('emits task:completed notification on success', async () => {
+      await runExecution(task, 'test-model');
+
+      expect(emitNotification).toHaveBeenCalledWith('task:completed', expect.objectContaining({
+        taskId: task.id,
+        projectId: project.id,
+      }));
+    });
+
+    it('emits all-tasks:done when all tasks are complete', async () => {
+      checkAllTasksDone.mockReturnValueOnce(true);
+
+      await runExecution(task, 'test-model');
+
+      expect(emitNotification).toHaveBeenCalledWith('all-tasks:done', expect.objectContaining({
+        projectId: project.id,
+      }));
+    });
+
+    it('emits cost:threshold-exceeded when threshold is crossed', async () => {
+      const settingsSpy = vi.spyOn(state, 'getNotificationSettings').mockReturnValue({
+        enabled: true, costThresholdUsd: 0.01,
+      });
+      const costSpy = vi.spyOn(state, 'getProjectCostSummary').mockReturnValue({
+        totalCost: 0.10,
+      });
+
+      await runExecution(task, 'test-model');
+
+      expect(emitNotification).toHaveBeenCalledWith('cost:threshold-exceeded', expect.objectContaining({
+        projectId: project.id,
+        threshold: 0.01,
+      }));
+
+      settingsSpy.mockRestore();
+      costSpy.mockRestore();
+    });
+  });
+
+  describe('task validation', () => {
+    it('reverts task status when validator rejects (no plan)', async () => {
+      runTaskValidators.mockResolvedValueOnce({
+        valid: false, message: 'Lint failed', validatorName: 'lint-check',
+      });
+
+      await runExecution(task, 'test-model');
+
+      const updated = state.getTask(task.id);
+      expect(updated.status).toBe('proposed');
+
+      const validationCall = broadcast.mock.calls.find(c => c[0] === 'execution:validation-failed');
+      expect(validationCall).toBeDefined();
+      expect(validationCall[1].message).toBe('Lint failed');
+      expect(validationCall[1].validator).toBe('lint-check');
+    });
+
+    it('reverts to planned when validator rejects task with plan', async () => {
+      state.updateTask(task.id, { plan: 'some plan' });
+      const taskWithPlan = state.getTask(task.id);
+      runTaskValidators.mockResolvedValueOnce({
+        valid: false, message: 'Bad output', validatorName: 'quality',
+      });
+
+      await runExecution(taskWithPlan, 'test-model');
+
+      const updated = state.getTask(task.id);
+      expect(updated.status).toBe('planned');
+    });
+  });
+
+  describe('file conflicts', () => {
+    it('detects file conflicts between executing tasks', async () => {
+      state.updateTask(task.id, { plan: 'Modify src/app.js and src/utils.js' });
+      const taskWithPlan = state.getTask(task.id);
+
+      extractFilePaths.mockReturnValueOnce(['src/app.js', 'src/utils.js']);
+      findFileConflicts.mockReturnValueOnce([{ taskId: 'task-2', file: 'src/app.js' }]);
+
+      await runExecution(taskWithPlan, 'test-model');
+
+      const conflictCall = broadcast.mock.calls.find(c => c[0] === 'execution:file-conflicts');
+      expect(conflictCall).toBeDefined();
+      expect(conflictCall[1].conflicts).toHaveLength(1);
+    });
+  });
+
+  describe('finally block cleanup', () => {
+    it('calls compressReplayLog and clearAborted on success', async () => {
+      const clearAbortedSpy = vi.spyOn(state, 'clearAborted');
+
+      await runExecution(task, 'test-model');
+
+      expect(compressReplayLog).toHaveBeenCalledWith(task.id, 'execution');
+      expect(clearAbortedSpy).toHaveBeenCalledWith(task.id);
+
+      clearAbortedSpy.mockRestore();
+    });
+
+    it('calls compressReplayLog and clearAborted on failure', async () => {
+      spawn.mockImplementation(() => createMockProcess(1, '', 'err'));
+      const clearAbortedSpy = vi.spyOn(state, 'clearAborted');
+
+      await expect(runExecution(task, 'test-model')).rejects.toThrow();
+
+      expect(compressReplayLog).toHaveBeenCalledWith(task.id, 'execution');
+      expect(clearAbortedSpy).toHaveBeenCalledWith(task.id);
+
+      clearAbortedSpy.mockRestore();
+    });
+
+    it('ends log stream in finally block', async () => {
+      await runExecution(task, 'test-model');
+
+      // createWriteStream is called to create the log stream
+      expect(createWriteStream).toHaveBeenCalled();
+      // The returned mock stream's end() should have been called
+      const mockStream = createWriteStream.mock.results[0].value;
+      expect(mockStream.end).toHaveBeenCalled();
+    });
+  });
+
+  describe('diff capture', () => {
+    it('captures diff between pre and post commit', async () => {
+      execFile.mockImplementation((cmd, args, opts, cb) => {
+        if (typeof opts === 'function') { cb = opts; opts = {}; }
+        if (cmd === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD') {
+          return cb(null, 'precommithash', '');
+        }
+        if (cmd === 'git' && args[0] === 'diff') {
+          return cb(null, '+ added line\n- removed line', '');
+        }
+        if (cb) cb(null, '', '');
+        return { on: vi.fn() };
+      });
+
+      await runExecution(task, 'test-model');
+
+      const updated = state.getTask(task.id);
+      expect(updated.diff).toContain('added line');
+    });
+
+    it('truncates diff exceeding 500KB', async () => {
+      const largeDiff = 'x'.repeat(600000);
+      execFile.mockImplementation((cmd, args, opts, cb) => {
+        if (typeof opts === 'function') { cb = opts; opts = {}; }
+        if (cmd === 'git' && args[0] === 'diff') {
+          return cb(null, largeDiff, '');
+        }
+        if (cmd === 'git' && args[0] === 'rev-parse') {
+          return cb(null, 'abc123hash', '');
+        }
+        if (cb) cb(null, '', '');
+        return { on: vi.fn() };
+      });
+
+      await runExecution(task, 'test-model');
+
+      const updated = state.getTask(task.id);
+      expect(updated.diff.length).toBeLessThan(600000);
+      expect(updated.diff).toContain('diff truncated');
+    });
+
+    it('sets diff to null when empty', async () => {
+      execFile.mockImplementation((cmd, args, opts, cb) => {
+        if (typeof opts === 'function') { cb = opts; opts = {}; }
+        if (cmd === 'git' && args[0] === 'diff') {
+          return cb(null, '', '');
+        }
+        if (cmd === 'git' && args[0] === 'rev-parse') {
+          return cb(null, 'abc123hash', '');
+        }
+        if (cb) cb(null, '', '');
+        return { on: vi.fn() };
+      });
+
+      await runExecution(task, 'test-model');
+
+      const updated = state.getTask(task.id);
+      expect(updated.diff).toBeNull();
+    });
+  });
+
+  describe('replay events', () => {
+    it('records prompt_sent, response_received, and parsed_output for execution', async () => {
+      await runExecution(task, 'test-model');
+
+      const replayTypes = writeReplayEvent.mock.calls
+        .filter(c => c[2].phase === 'execution')
+        .map(c => c[2].type);
+      expect(replayTypes).toContain('prompt_sent');
+      expect(replayTypes).toContain('response_received');
+      expect(replayTypes).toContain('parsed_output');
+    });
+
+    it('records error replay event on failure', async () => {
+      spawn.mockImplementation(() => createMockProcess(1, '', 'exec error'));
+
+      await expect(runExecution(task, 'test-model')).rejects.toThrow();
+
+      const errorEvents = writeReplayEvent.mock.calls.filter(c => c[2].type === 'error');
+      expect(errorEvents.length).toBeGreaterThanOrEqual(1);
     });
   });
 });
