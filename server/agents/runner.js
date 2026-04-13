@@ -3,9 +3,9 @@ import { createWriteStream, mkdirSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { broadcast } from '../ws.js';
-import { buildGenerationCommand, buildExecutionCommand, buildTestSetupCommand } from './cli.js';
-import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, buildTestSetupPrompt, buildJudgmentPrompt, getBuiltInTemplates } from './prompts.js';
-import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput, parseJudgmentOutput, extractClaudeJsonOutput, estimateTokensFromText } from './parser.js';
+import { buildGenerationCommand, buildExecutionCommand, buildTestSetupCommand, buildRankingCommand } from './cli.js';
+import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, buildTestSetupPrompt, buildJudgmentPrompt, buildRankingPrompt, getBuiltInTemplates } from './prompts.js';
+import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput, parseJudgmentOutput, parseRankingOutput, extractClaudeJsonOutput, estimateTokensFromText } from './parser.js';
 import { toWSLPath } from '../paths.js';
 import { DEFAULT_MODEL_ID, getModel, estimateCost } from '../models.js';
 import { runTests, validateTestCommand } from '../testing.js';
@@ -496,6 +496,105 @@ export async function runPlanning(task, modelId) {
     logStream.end();
     compressReplayLog(task.id, 'planning').catch(() => {});
     state.removeProcess(task.id);
+    unregisterAgent(agentId);
+  }
+}
+
+export async function runRanking(project, modelId) {
+  modelId = modelId || DEFAULT_MODEL_ID;
+  const proposedTasks = state.getTasks(project.id).filter(t => t.status === 'proposed');
+  if (proposedTasks.length === 0) throw new Error('No proposed tasks to rank');
+
+  const prompt = buildRankingPrompt(project.path, proposedTasks);
+  const { cmd, args, useStdin } = buildRankingCommand(modelId, prompt);
+
+  broadcast('ranking:started', { projectId: project.id });
+  const agentId = registerAgent({ type: 'ranking', projectId: project.id, modelId });
+
+  writeReplayEvent(project.id, 'ranking', {
+    type: 'prompt_sent', phase: 'ranking', projectId: project.id, modelId, prompt,
+    cmd, args: args.filter(a => a !== prompt),
+  });
+
+  try {
+    const { promise } = spawnAgent(
+      cmd, args, project.path,
+      useStdin ? prompt : null,
+      (bytes) => { broadcast('ranking:progress', { projectId: project.id, bytesReceived: bytes }); },
+      null
+    );
+    const stdout = await promise;
+    const costData = extractCostData(stdout, prompt, modelId);
+
+    writeReplayEvent(project.id, 'ranking', {
+      type: 'response_received', phase: 'ranking', projectId: project.id, modelId,
+      rawResponse: stdout.slice(0, 100000),
+      costUsd: costData.costUsd, inputTokens: costData.inputTokens,
+      outputTokens: costData.outputTokens, durationMs: costData.durationMs, numTurns: costData.numTurns,
+    });
+
+    const rankingItems = parseRankingOutput(costData.agentText);
+
+    writeReplayEvent(project.id, 'ranking', {
+      type: 'parsed_output', phase: 'ranking', projectId: project.id,
+      parsedResult: rankingItems, itemCount: rankingItems.length,
+    });
+
+    // Extract ordered task IDs, filtering to only valid proposed tasks
+    const proposedIds = new Set(proposedTasks.map(t => t.id));
+    const rankedIds = rankingItems
+      .map(item => item.taskId)
+      .filter(id => proposedIds.has(id));
+
+    // Append any proposed tasks the LLM missed to the end
+    for (const t of proposedTasks) {
+      if (!rankedIds.includes(t.id)) rankedIds.push(t.id);
+    }
+
+    // Reorder tasks
+    state.reorderTasks(rankedIds);
+
+    // Split cost evenly across ranked tasks
+    const costPerTask = costData.costUsd ? costData.costUsd / rankedIds.length : 0;
+    const tokenShareInput = costData.inputTokens ? Math.round(costData.inputTokens / rankedIds.length) : 0;
+    const tokenShareOutput = costData.outputTokens ? Math.round(costData.outputTokens / rankedIds.length) : 0;
+
+    for (const taskId of rankedIds) {
+      const task = state.getTask(taskId);
+      if (!task) continue;
+      state.updateTask(taskId, {
+        tokenUsage: {
+          ...(task.tokenUsage || {}),
+          ranking: { input: tokenShareInput, output: tokenShareOutput },
+        },
+        costUsd: (task.costUsd || 0) + costPerTask,
+      });
+    }
+
+    // Build reasoning map from LLM output
+    const reasoningMap = {};
+    for (const item of rankingItems) {
+      if (item.taskId && item.reasoning) reasoningMap[item.taskId] = item.reasoning;
+    }
+
+    broadcast('ranking:completed', {
+      projectId: project.id,
+      rankedIds,
+      reasoning: reasoningMap,
+      costUsd: costData.costUsd,
+    });
+    broadcast('tasks:reordered', { orderedIds: rankedIds });
+
+    return { rankedIds, reasoning: reasoningMap, costUsd: costData.costUsd };
+  } catch (err) {
+    writeReplayEvent(project.id, 'ranking', {
+      type: 'error', phase: 'ranking', projectId: project.id,
+      error: err.message, stack: err.stack?.slice(0, 2000),
+    });
+    broadcast('ranking:failed', { projectId: project.id, error: err.message });
+    throw err;
+  } finally {
+    compressReplayLog(project.id, 'ranking').catch(() => {});
     unregisterAgent(agentId);
   }
 }

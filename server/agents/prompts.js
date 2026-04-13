@@ -5,7 +5,7 @@ import { dirname, join } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const skillsDir = join(__dirname, '..', 'skills');
 
-let paretoSkill, paretoFullSkill, rubricSkill, planningSkill, autoclickerJudgeSkill;
+let paretoSkill, paretoFullSkill, rubricSkill, planningSkill, autoclickerJudgeSkill, rankingSkill;
 
 try {
   paretoSkill = readFileSync(join(skillsDir, 'pareto.md'), 'utf-8');
@@ -35,6 +35,12 @@ try {
   autoclickerJudgeSkill = readFileSync(join(skillsDir, 'autoclicker-judge.md'), 'utf-8');
 } catch {
   autoclickerJudgeSkill = 'You are an autonomous project improvement judge. Analyze the project state and decide what action to take next.';
+}
+
+try {
+  rankingSkill = readFileSync(join(skillsDir, 'rank-proposals.md'), 'utf-8');
+} catch {
+  rankingSkill = 'Analyze the project and rank the proposed tasks by value.';
 }
 
 export function getBuiltInTemplates() {
@@ -200,4 +206,32 @@ ${context}
 Analyze the project state and output your decision.
 
 IMPORTANT: Your output MUST contain the decision wrapped in <autoclicker-decision> tags. Do not output anything after the closing tag.`;
+}
+
+export function buildRankingPrompt(projectPath, proposedTasks) {
+  const taskList = proposedTasks.map(t => ({
+    id: t.id,
+    title: t.title,
+    description: t.description?.slice(0, 500),
+    rationale: t.rationale?.slice(0, 500),
+    effort: t.effort,
+  }));
+
+  return `${rankingSkill}
+
+---
+
+## Project
+
+Working directory: ${projectPath}
+
+## Proposed Tasks to Rank
+
+\`\`\`json
+${JSON.stringify(taskList, null, 2)}
+\`\`\`
+
+Analyze the project at the working directory, then rank ALL ${taskList.length} tasks above from most valuable to least valuable.
+
+IMPORTANT: Your output MUST contain the ranking wrapped in <ranking-result> tags exactly as specified in the instructions above. Do not output anything after the closing </ranking-result> tag.`;
 }

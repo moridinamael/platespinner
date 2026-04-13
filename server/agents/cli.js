@@ -35,6 +35,37 @@ export function buildGenerationCommand(modelId, prompt) {
   }
 }
 
+export function buildRankingCommand(modelId, prompt) {
+  const model = getModel(modelId);
+  if (!model) throw new Error(`Unknown model: ${modelId}`);
+
+  const rankingCustomTools = getCustomToolNames('generation');
+  const rankingTools = ['Read', 'Glob', 'Grep', ...rankingCustomTools].join(',');
+
+  switch (model.provider) {
+    case 'claude':
+      return {
+        cmd: 'claude',
+        args: ['-p', '--model', modelId, '--output-format', 'json', '--allowedTools', rankingTools],
+        useStdin: true,
+      };
+    case 'codex':
+      return {
+        cmd: 'codex',
+        args: ['exec', prompt, '--model', modelId, '--sandbox', 'read-only'],
+        useStdin: false,
+      };
+    case 'gemini':
+      return {
+        cmd: 'gemini',
+        args: ['--model', modelId, '-p', prompt],
+        useStdin: false,
+      };
+    default:
+      throw new Error(`Unknown provider: ${model.provider}`);
+  }
+}
+
 export function buildTestSetupCommand(modelId, prompt) {
   // Same tools as execution — agent needs to read, write, and run tests
   return buildExecutionCommand(modelId, prompt);

@@ -179,6 +179,33 @@ function validateDecision(decision) {
   };
 }
 
+export function parseRankingOutput(stdout) {
+  // Strategy 1: Extract from <ranking-result> tags
+  const tagMatch = stdout.match(/<ranking-result>([\s\S]*?)<\/ranking-result>/);
+  if (tagMatch) {
+    try {
+      const parsed = JSON.parse(tagMatch[1].trim());
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* fall through */ }
+  }
+
+  // Strategy 2: Find JSON array with taskId keys
+  const arrayMatch = stdout.match(/\[[\s\S]*?\{[\s\S]*?"taskId"[\s\S]*?\}[\s\S]*?\]/);
+  if (arrayMatch) {
+    try {
+      const parsed = JSON.parse(arrayMatch[0]);
+      if (Array.isArray(parsed) && parsed[0]?.taskId) return parsed;
+    } catch { /* fall through */ }
+  }
+
+  // Strategy 3: Try custom parsers
+  const customResult = runCustomParsers('ranking', stdout);
+  if (customResult) return customResult;
+
+  // Strategy 4: Empty — ranking failed
+  return [];
+}
+
 export function parseExecutionOutput(stdout) {
   // Strategy 1: Extract from <execution-result> tags
   const tagMatch = stdout.match(/<execution-result>([\s\S]*?)<\/execution-result>/);

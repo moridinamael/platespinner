@@ -4,7 +4,7 @@ import * as state from '../state.js';
 import { broadcast } from '../ws.js';
 import { toWSLPath } from '../paths.js';
 import { detectTestFramework, runTests, validateTestCommand } from '../testing.js';
-import { runTestSetup } from '../agents/runner.js';
+import { runTestSetup, runRanking } from '../agents/runner.js';
 import { MODELS } from '../models.js';
 import { emitNotification } from '../notifications.js';
 import { renderPRBody } from '../prUtils.js';
@@ -576,6 +576,34 @@ router.post('/projects/:projectId/tasks/:taskId/merge-pr', async (req, res) => {
     res.status(500).json({ error: `PR merge failed: ${err.message}` });
   }
 });
+
+// Rank proposed tasks using an LLM agent
+router.post('/projects/:id/rank-proposals',
+  validateBody({ modelId: { type: 'string' } }),
+  async (req, res) => {
+    const project = req.project;
+    const proposedTasks = state.getTasks(project.id).filter(t => t.status === 'proposed');
+
+    if (proposedTasks.length === 0) {
+      return res.status(400).json({ error: 'No proposed tasks to rank' });
+    }
+
+    const { modelId } = req.body || {};
+
+    // Fire and forget — results come via WebSocket
+    res.json({
+      message: 'Ranking started',
+      projectId: project.id,
+      taskCount: proposedTasks.length,
+    });
+
+    try {
+      await runRanking(project, modelId);
+    } catch (err) {
+      console.error('Ranking failed:', err.message);
+    }
+  }
+);
 
 export { checkRailwayHealth };
 export default router;

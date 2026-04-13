@@ -19,7 +19,7 @@ export function unregisterAgent(agentId) {
 
 export function getAgentCounts() {
   const agents = [...activeAgents.values()];
-  const byType = { generating: 0, planning: 0, executing: 0, settingUpTests: 0 };
+  const byType = { generating: 0, planning: 0, executing: 0, settingUpTests: 0, ranking: 0 };
   const byProvider = { claude: 0, gemini: 0, codex: 0 };
   for (const a of agents) {
     if (a.type in byType) byType[a.type]++;

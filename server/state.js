@@ -413,7 +413,7 @@ export function getAnalyticsData(projectId) {
   }
 
   // 4. Token usage breakdown (by phase)
-  const tokensByPhase = { generation: { input: 0, output: 0 }, planning: { input: 0, output: 0 }, execution: { input: 0, output: 0 }, judgment: { input: 0, output: 0 } };
+  const tokensByPhase = { generation: { input: 0, output: 0 }, planning: { input: 0, output: 0 }, execution: { input: 0, output: 0 }, judgment: { input: 0, output: 0 }, ranking: { input: 0, output: 0 } };
   for (const t of allTasks) {
     if (!t.tokenUsage) continue;
     for (const [phase, usage] of Object.entries(t.tokenUsage)) {
