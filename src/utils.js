@@ -43,34 +43,27 @@ export function resolveTaskModelId(task) {
       : task.generatedBy;
 }
 
-export function getModelLabelForTask(task, models) {
+export function resolveTaskModel(task, models) {
   const modelId = resolveTaskModelId(task);
 
   if (modelId && models?.length) {
     const found = models.find((m) => m.id === modelId);
-    if (found) return found.label;
-    return modelId;
+    if (found) {
+      return { modelId, label: found.label, provider: found.provider };
+    }
+    return { modelId, label: modelId, provider: task.agentType || 'claude' };
   }
 
   // Backwards compat: fall back to agentType for old tasks
   if (task.agentType) {
-    return task.agentType.charAt(0).toUpperCase() + task.agentType.slice(1);
+    return {
+      modelId: null,
+      label: task.agentType.charAt(0).toUpperCase() + task.agentType.slice(1),
+      provider: task.agentType,
+    };
   }
 
-  return null;
-}
-
-export function getModelProviderForTask(task, models) {
-  const modelId = resolveTaskModelId(task);
-
-  if (modelId && models?.length) {
-    const found = models.find((m) => m.id === modelId);
-    if (found) return found.provider;
-  }
-
-  // Backwards compat
-  if (task.agentType) return task.agentType;
-  return 'claude';
+  return { modelId: null, label: null, provider: 'claude' };
 }
 
 export function formatCost(costUsd) {

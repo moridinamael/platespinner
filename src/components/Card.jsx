@@ -4,7 +4,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { useTaskProgress } from '../hooks/useTaskProgress.js';
 import { useSharedClock } from '../hooks/useSharedClock.js';
-import { formatBytes, getModelLabelForTask, getModelProviderForTask } from '../utils.js';
+import { formatBytes, resolveTaskModel } from '../utils.js';
 
 const ActivitySpinner = ({ variant }) => (
   <svg className={`activity-spinner activity-spinner-${variant}`} width="16" height="16" viewBox="0 0 16 16">
@@ -50,8 +50,7 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
 
   const [confirmingDismiss, armDismiss, resetDismiss] = useConfirm();
 
-  const modelLabel = getModelLabelForTask(task, models);
-  const modelProvider = getModelProviderForTask(task, models);
+  const { label: modelLabel, provider: modelProvider } = resolveTaskModel(task, models);
 
   return (
     <div
