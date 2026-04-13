@@ -127,6 +127,22 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
           </span>
         )}
 
+        {task.rankingRank != null && (
+          <span className="ranking-badge-wrapper">
+            <span className="ranking-badge">
+              #{task.rankingRank}
+            </span>
+            {task.rankingReason && (
+              <span className="ranking-tooltip">
+                {task.rankingScore != null && (
+                  <span className="ranking-tooltip-score">Score: {task.rankingScore}/10</span>
+                )}
+                <span className="ranking-tooltip-reason">{task.rankingReason}</span>
+              </span>
+            )}
+          </span>
+        )}
+
         {task.similarTasks?.length > 0 && (
           <span className="duplicate-badge" title={`${task.similarTasks.length} potential duplicate(s)`}>
             ~{task.similarTasks.length}

@@ -27,10 +27,15 @@ You MUST wrap your output in XML tags exactly like this:
     "title": "Short imperative title",
     "description": "Detailed description of what to change and how",
     "rationale": "Why this matters — impact on quality/performance/security",
-    "estimatedEffort": "small|medium|large"
+    "estimatedEffort": "small|medium|large",
+    "rank": 1,
+    "rankingScore": 8.5,
+    "rankingReason": "Brief explanation of why this task is ranked at this position"
   }
 ]
 </task-proposals>
+
+Number proposals from 1 (highest priority) in the `rank` field. Assign a `rankingScore` (1-10 scale, 10 = highest impact/effort ratio) and a brief `rankingReason` explaining the ranking.
 
 Each proposal must be:
 - **Actionable** — A developer could start implementing immediately

@@ -328,6 +328,9 @@ export function addTask({ projectId, title, description, rationale, effort, gene
     dependencies: [],
     similarTasks: null,
     trackedFiles: null,
+    rankingRank: null,
+    rankingScore: null,
+    rankingReason: null,
   };
   tasks.set(id, task);
   save();

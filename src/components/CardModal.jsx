@@ -444,6 +444,32 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
               </div>
             )}
 
+            {(task.rankingRank != null || task.rankingScore != null || task.rankingReason) && (
+              <div className="modal-section">
+                <h3>Ranking</h3>
+                <div className="ranking-details">
+                  {task.rankingRank != null && (
+                    <div className="ranking-detail-row">
+                      <span className="ranking-detail-label">Position</span>
+                      <span className="ranking-detail-value">#{task.rankingRank}</span>
+                    </div>
+                  )}
+                  {task.rankingScore != null && (
+                    <div className="ranking-detail-row">
+                      <span className="ranking-detail-label">Score</span>
+                      <span className="ranking-detail-value">{task.rankingScore}/10</span>
+                    </div>
+                  )}
+                  {task.rankingReason && (
+                    <div className="ranking-detail-row">
+                      <span className="ranking-detail-label">Reasoning</span>
+                      <span className="ranking-detail-value">{task.rankingReason}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="modal-section">
               <h3>Dependencies {isBlocked && <span className="blocked-badge">Blocked</span>}</h3>
               {editing ? (

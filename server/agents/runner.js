@@ -359,6 +359,15 @@ export async function runGeneration(project, templateId, modelId, promptContent)
         pendingReview.push({ taskId: task.id, title: task.title, similar });
       }
 
+      // Store ranking data if present in the proposal
+      if (proposal.rank != null || proposal.rankingScore != null || proposal.rankingReason) {
+        state.updateTask(task.id, {
+          rankingRank: proposal.rank != null ? Number(proposal.rank) || null : null,
+          rankingScore: proposal.rankingScore != null ? Number(proposal.rankingScore) || null : null,
+          rankingReason: proposal.rankingReason || null,
+        });
+      }
+
       if (costPerTask != null) {
         state.updateTask(task.id, {
           tokenUsage: { generation: { input: costData.inputTokens, output: costData.outputTokens } },
@@ -571,10 +580,19 @@ export async function runRanking(project, modelId) {
       });
     }
 
-    // Build reasoning map from LLM output
+    // Persist ranking data on each task and build reasoning map
     const reasoningMap = {};
     for (const item of rankingItems) {
       if (item.taskId && item.reasoning) reasoningMap[item.taskId] = item.reasoning;
+      if (item.taskId) {
+        const rankUpdates = {};
+        if (item.rank != null) rankUpdates.rankingRank = Number(item.rank) || null;
+        if (item.score != null) rankUpdates.rankingScore = Number(item.score) || null;
+        if (item.reasoning) rankUpdates.rankingReason = item.reasoning;
+        if (Object.keys(rankUpdates).length > 0) {
+          state.updateTask(item.taskId, rankUpdates);
+        }
+      }
     }
 
     broadcast('ranking:completed', {

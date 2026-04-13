@@ -3908,6 +3908,88 @@ html, body {
   cursor: help;
 }
 
+/* ===== Ranking Badge & Tooltip ===== */
+
+.ranking-badge-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.ranking-badge {
+  background: rgba(108, 138, 255, 0.2);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 8px;
+  cursor: help;
+  white-space: nowrap;
+}
+
+.ranking-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-3, var(--surface-2));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text);
+  min-width: 200px;
+  max-width: 300px;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+.ranking-badge-wrapper:hover .ranking-tooltip {
+  display: block;
+}
+
+.ranking-tooltip-score {
+  display: block;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.ranking-tooltip-reason {
+  display: block;
+  color: var(--text-dim);
+}
+
+/* Ranking details in modal */
+.ranking-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ranking-detail-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.ranking-detail-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  min-width: 70px;
+}
+
+.ranking-detail-value {
+  font-size: 13px;
+  color: var(--text);
+}
+
+[data-theme="light"] .ranking-tooltip {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
 /* ===== Related tasks in modal ===== */
 
 .modal-related-section {
