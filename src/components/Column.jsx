@@ -3,7 +3,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import Card from './Card.jsx';
 
-function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, onMergePR, models, selectedIds, onToggleSelect, filterActive, columnKey, onPlanAll, onExecuteAll, focusedTaskId, onRetry, blockedTaskIds }) {
+function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, onMergePR, models, selectedIds, onToggleSelect, filterActive, columnKey, onPlanAll, onExecuteAll, focusedTaskId, onRetry, blockedTaskIds, onRankProposals, rankingInProgress }) {
   const executingTasks = tasks.filter(t => t.status !== 'queued');
   const queuedTasks = tasks.filter(t => t.status === 'queued')
     .sort((a, b) => (a.queuePosition ?? Infinity) - (b.queuePosition ?? Infinity) || (a.createdAt || 0) - (b.createdAt || 0));
@@ -20,6 +20,20 @@ function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onEx
         {columnKey === 'proposed' && tasks.some(t => t.status === 'proposed') && (
           <button className="btn btn-plan btn-column-action" onClick={onPlanAll} title="Plan all proposed tasks">
             Plan All
+          </button>
+        )}
+        {columnKey === 'proposed' && tasks.filter(t => t.status === 'proposed').length >= 2 && (
+          <button
+            className="btn btn-column-action"
+            onClick={onRankProposals}
+            disabled={rankingInProgress}
+            title="Rank proposed tasks by priority"
+          >
+            {rankingInProgress ? (
+              <><span className="spinner spinner-sm" /> Ranking...</>
+            ) : (
+              'Rank'
+            )}
           </button>
         )}
         {columnKey === 'plan' && tasks.some(t => t.status === 'planned') && (

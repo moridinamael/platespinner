@@ -29,6 +29,7 @@ export const api = {
   getTasks: (projectId) => request('GET', projectId ? `/tasks?projectId=${projectId}` : '/tasks'),
   updateTask: (id, updates) => request('PATCH', `/tasks/${id}`, updates),
   reorderTasks: (orderedIds) => request('PATCH', '/tasks/reorder', { orderedIds }),
+  rankProposals: (projectId, modelId) => request('POST', `/projects/${projectId}/rank-proposals`, { modelId }),
   getTemplates: () => request('GET', '/templates'),
   createTemplate: (data) => request('POST', '/templates', data),
   deleteTemplate: (id) => request('DELETE', `/templates/${id}`),

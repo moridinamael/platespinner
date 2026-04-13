@@ -92,6 +92,7 @@ export default function App() {
   });
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkInFlight, setBulkInFlight] = useState(false);
+  const [rankingInProgress, setRankingInProgress] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [focusedCardIndex, setFocusedCardIndex] = useState(-1);
   const [replayResults, setReplayResults] = useState({});
@@ -950,6 +951,20 @@ export default function App() {
     }
   }, [filteredTasks, showToast]);
 
+  const handleRankProposals = useCallback(async () => {
+    const proposedTasks = filteredTasks.filter(t => t.status === 'proposed');
+    if (proposedTasks.length < 2 || rankingInProgress) return;
+    const projectIds = [...new Set(proposedTasks.map(t => t.projectId))];
+    setRankingInProgress(true);
+    try {
+      await Promise.all(projectIds.map(pid => api.rankProposals(pid)));
+    } catch (err) {
+      showToast(`Ranking failed: ${err.message}`, 'error');
+    } finally {
+      setRankingInProgress(false);
+    }
+  }, [filteredTasks, rankingInProgress, showToast]);
+
   const handleExecuteAll = useCallback(async () => {
     const plannedIds = filteredTasks
       .filter(t => t.status === 'planned')
@@ -1351,6 +1366,8 @@ export default function App() {
               onMoveTask={handleMoveTask}
               onRetry={handleRetry}
               blockedTaskIds={blockedTaskIds}
+              onRankProposals={handleRankProposals}
+              rankingInProgress={rankingInProgress}
             />
             {selectedIds.size > 0 && (
               <BulkActionBar

@@ -342,6 +342,10 @@ html, body {
   opacity: 1;
 }
 
+.btn-column-action + .btn-column-action {
+  margin-left: 0;
+}
+
 /* Stop All button */
 .btn-stop-all {
   background: var(--red);
