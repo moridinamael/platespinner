@@ -781,29 +781,23 @@ export function getActiveWorktreeCount() {
   return worktreeLocks.size;
 }
 
-export function getAutoclickerCycleCount(projectId) {
-  return autoclickerCycleCount.get(projectId) || 0;
+function makeCounter(map) {
+  return {
+    get(id) { return map.get(id) || 0; },
+    increment(id) { map.set(id, (map.get(id) || 0) + 1); },
+    reset(id) { map.delete(id); },
+  };
 }
 
-export function incrementCycleCount(projectId) {
-  autoclickerCycleCount.set(projectId, (autoclickerCycleCount.get(projectId) || 0) + 1);
-}
+const cycleCounter = makeCounter(autoclickerCycleCount);
+export const getAutoclickerCycleCount = cycleCounter.get;
+export const incrementCycleCount = cycleCounter.increment;
+export const resetCycleCount = cycleCounter.reset;
 
-export function resetCycleCount(projectId) {
-  autoclickerCycleCount.delete(projectId);
-}
-
-export function getConsecutiveFailures(projectId) {
-  return autoclickerConsecutiveFailures.get(projectId) || 0;
-}
-
-export function incrementConsecutiveFailures(projectId) {
-  autoclickerConsecutiveFailures.set(projectId, (autoclickerConsecutiveFailures.get(projectId) || 0) + 1);
-}
-
-export function resetConsecutiveFailures(projectId) {
-  autoclickerConsecutiveFailures.delete(projectId);
-}
+const failureCounter = makeCounter(autoclickerConsecutiveFailures);
+export const getConsecutiveFailures = failureCounter.get;
+export const incrementConsecutiveFailures = failureCounter.increment;
+export const resetConsecutiveFailures = failureCounter.reset;
 
 // --- Dependency Helpers ---
 
