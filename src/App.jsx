@@ -18,6 +18,7 @@ import { useWebSocket } from './hooks/useWebSocket.js';
 import { useProjects } from './hooks/useProjects.js';
 import { useTasks } from './hooks/useTasks.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
+import { useActivityFeed } from './hooks/useActivityFeed.js';
 
 export default function App() {
   const { theme, toggleTheme } = useTheme();
@@ -71,6 +72,14 @@ export default function App() {
     handleClearSetupResult,
     handleTaskWsEvent,
   } = useTasks({ selectedProjectId, showToast });
+
+  const {
+    activities,
+    unreadCount,
+    markAllRead,
+    dismissEntry,
+    handleActivityWsEvent,
+  } = useActivityFeed();
 
   // App-level UI state
   const [activeTab, setActiveTab] = useState('board');
@@ -171,6 +180,7 @@ export default function App() {
   useWebSocket({
     handleProjectWsEvent,
     handleTaskWsEvent,
+    handleActivityWsEvent,
     setTestStatusMap,
     setRailwayStatusMap,
     setAgentCensus,

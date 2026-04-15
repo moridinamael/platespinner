@@ -10,6 +10,7 @@ import { WebSocketManager, api } from '../api.js';
 export function useWebSocket({
   handleProjectWsEvent,
   handleTaskWsEvent,
+  handleActivityWsEvent,
   setTestStatusMap,
   setRailwayStatusMap,
   setAgentCensus,
@@ -21,6 +22,7 @@ export function useWebSocket({
   const dispatchersRef = useRef({
     handleProjectWsEvent,
     handleTaskWsEvent,
+    handleActivityWsEvent,
     setTestStatusMap,
     setRailwayStatusMap,
     setAgentCensus,
@@ -32,6 +34,7 @@ export function useWebSocket({
     dispatchersRef.current = {
       handleProjectWsEvent,
       handleTaskWsEvent,
+      handleActivityWsEvent,
       setTestStatusMap,
       setRailwayStatusMap,
       setAgentCensus,
@@ -45,6 +48,7 @@ export function useWebSocket({
     const d = dispatchersRef.current;
     d.handleProjectWsEvent(event, data);
     d.handleTaskWsEvent(event, data);
+    d.handleActivityWsEvent(event, data);
 
     switch (event) {
       case 'project:removed':
