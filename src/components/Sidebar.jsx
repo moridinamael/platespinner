@@ -190,10 +190,10 @@ function Sidebar({
       const opts = { signal: controller.signal };
       api.getGitStatus(selectedProjectId, opts)
         .then(setGitInfo)
-        .catch(() => { if (!controller.signal.aborted) setGitInfo(null); });
+        .catch(err => { if (!controller.signal.aborted) { console.warn('Failed to load git status:', err); setGitInfo(null); } });
       api.getTestInfo(selectedProjectId, opts)
         .then(setTestInfo)
-        .catch(() => { if (!controller.signal.aborted) setTestInfo(null); });
+        .catch(err => { if (!controller.signal.aborted) { console.warn('Failed to load test info:', err); setTestInfo(null); } });
     }, 300);
 
     return () => {
@@ -207,8 +207,8 @@ function Sidebar({
     if (!setupResult || !selectedProjectId) return;
     const controller = new AbortController();
     const opts = { signal: controller.signal };
-    api.getTestInfo(selectedProjectId, opts).then(setTestInfo).catch(() => {});
-    api.getGitStatus(selectedProjectId, opts).then(setGitInfo).catch(() => {});
+    api.getTestInfo(selectedProjectId, opts).then(setTestInfo).catch(err => console.warn('Failed to refresh test info after setup:', err));
+    api.getGitStatus(selectedProjectId, opts).then(setGitInfo).catch(err => console.warn('Failed to refresh git status after setup:', err));
     return () => controller.abort();
   }, [setupResult, selectedProjectId]);
 
@@ -262,7 +262,7 @@ function Sidebar({
     try {
       const result = await api.pushProject(projectId);
       setPushResult({ success: true, output: result.output });
-      api.getGitStatus(projectId).then(setGitInfo).catch(() => {});
+      api.getGitStatus(projectId).then(setGitInfo).catch(err => console.warn('Failed to refresh git status after push:', err));
     } catch (err) {
       setPushResult({ success: false, output: err.message });
     } finally {
@@ -277,7 +277,7 @@ function Sidebar({
     if (trimmed === (selectedProject?.testCommand || '')) return;
     try {
       await api.updateProject(selectedProjectId, { testCommand: trimmed });
-      api.getTestInfo(selectedProjectId).then(setTestInfo).catch(() => {});
+      api.getTestInfo(selectedProjectId).then(setTestInfo).catch(err => console.warn('Failed to refresh test info:', err));
     } catch (err) { onShowToast?.('Failed to save test command: ' + err.message, 'error'); }
   };
 

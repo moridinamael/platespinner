@@ -110,7 +110,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   // Fetch log metadata when Logs tab is selected
   useEffect(() => {
     if (activeTab !== 'logs' || !task) return;
-    api.getTaskLogMeta(task.id).then(setLogMeta).catch(() => setLogMeta([]));
+    api.getTaskLogMeta(task.id).then(setLogMeta).catch(err => { console.warn('Failed to load log metadata:', err); setLogMeta([]); });
   }, [activeTab, task?.id]);
 
   // Auto-select latest available phase
@@ -130,7 +130,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
         setLogContent(text);
         setLogLoading(false);
       })
-      .catch(() => { setLogContent(''); setLogLoading(false); });
+      .catch(err => { console.warn('Failed to load log content:', err); setLogContent(''); setLogLoading(false); });
   }, [selectedLogPhase, task?.id, activeTab, isActive]);
 
   // Fetch replay timeline when Timeline tab is selected
@@ -159,7 +159,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
         setRelatedTasks(data.similar || []);
         setRelatedLoading(false);
       })
-      .catch(() => { setRelatedTasks([]); setRelatedLoading(false); });
+      .catch(err => { console.warn('Failed to load related tasks:', err); setRelatedTasks([]); setRelatedLoading(false); });
   }, [activeTab, task?.id, relatedTasks]);
 
   // Handle incoming replay result from WebSocket

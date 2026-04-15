@@ -157,7 +157,7 @@ export default function App() {
     api.getTemplates().then(setTemplates).catch(console.error);
     api.getModels().then(setModels).catch(console.error);
     api.getAgentStatus().then(setAgentCensus).catch(console.error);
-    api.getAutoclickerStatus().then(setAutoclickerStatus).catch(() => {});
+    api.getAutoclickerStatus().then(setAutoclickerStatus).catch(err => console.warn('Failed to load autoclicker status:', err));
     api.getNotificationSettings().then(setNotificationSettings).catch(console.error);
     api.getTasks().then((loaded) => {
       setTasks(loaded);
@@ -639,7 +639,7 @@ export default function App() {
       case 'autoclicker:project-disabled':
       case 'autoclicker:merge-conflict':
       case 'autoclicker:merge-complete':
-        api.getAutoclickerStatus().then(setAutoclickerStatus).catch(() => {});
+        api.getAutoclickerStatus().then(setAutoclickerStatus).catch(err => console.warn('Failed to refresh autoclicker status:', err));
         break;
       case 'replay:completed':
         setReplayResults(prev => ({ ...prev, [data.taskId]: data }));
