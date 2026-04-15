@@ -113,6 +113,7 @@ export default function App() {
     activeTab,
     filteredTasks,
     commandPaletteOpen, setCommandPaletteOpen,
+    activityFeedOpen, toggleActivityFeed, setActivityFeedOpen,
     handlePlan, handleExecute, handleDismiss,
   });
 
@@ -519,6 +520,10 @@ export default function App() {
           onExecute={handleExecute}
           onDismiss={handleDismiss}
           onClose={() => setCommandPaletteOpen(false)}
+          onToggleActivityFeed={toggleActivityFeed}
+          onShowRecentCompletions={() => { setActivityFeedOpen(true); markAllRead(); }}
+          onShowUnreadActivity={() => { setActivityFeedOpen(true); }}
+          activityFeedOpen={activityFeedOpen}
         />
       )}
       {showSkillEditor && (

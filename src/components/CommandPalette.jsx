@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo, memo } from 'react';
 const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 const modKey = isMac ? '\u2318' : 'Ctrl';
 
-function CommandPalette({ projects, tasks, selectedProjectId, onSelectProject, onSelectTask, onPlan, onExecute, onDismiss, onClose }) {
+function CommandPalette({ projects, tasks, selectedProjectId, onSelectProject, onSelectTask, onPlan, onExecute, onDismiss, onClose, onToggleActivityFeed, onShowRecentCompletions, onShowUnreadActivity, activityFeedOpen }) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef(null);
@@ -53,8 +53,32 @@ function CommandPalette({ projects, tasks, selectedProjectId, onSelectProject, o
         });
       }
     });
+    // Activity Feed commands
+    cmds.push({
+      id: 'action:activity-feed',
+      type: 'action',
+      label: 'Activity Feed',
+      description: activityFeedOpen ? 'Close activity panel' : 'Open activity panel',
+      shortcut: `${modKey}+Shift+A`,
+      action: () => { onToggleActivityFeed(); onClose(); },
+    });
+    cmds.push({
+      id: 'action:recent-completions',
+      type: 'action',
+      label: 'Show Recent Completions',
+      description: 'View recently completed tasks',
+      action: () => { onShowRecentCompletions(); onClose(); },
+    });
+    cmds.push({
+      id: 'action:unread-activity',
+      type: 'action',
+      label: 'Show Unread Activity',
+      description: 'View activity since last check',
+      action: () => { onShowUnreadActivity(); onClose(); },
+    });
+
     return cmds;
-  }, [projects, tasks, selectedProjectId, onSelectProject, onSelectTask, onPlan, onExecute, onDismiss, onClose]);
+  }, [projects, tasks, selectedProjectId, onSelectProject, onSelectTask, onPlan, onExecute, onDismiss, onClose, onToggleActivityFeed, onShowRecentCompletions, onShowUnreadActivity, activityFeedOpen]);
 
   const filtered = useMemo(() => {
     if (!query) return commands.slice(0, 20);

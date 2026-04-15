@@ -6,6 +6,7 @@ export function useKeyboardShortcuts({
   activeTab,
   filteredTasks,
   commandPaletteOpen, setCommandPaletteOpen,
+  activityFeedOpen, toggleActivityFeed, setActivityFeedOpen,
   handlePlan, handleExecute, handleDismiss,
 }) {
   const [focusedCardIndex, setFocusedCardIndex] = useState(-1);
@@ -49,10 +50,21 @@ export function useKeyboardShortcuts({
         return;
       }
 
+      // Ctrl/Cmd+Shift+A: toggle activity feed (always works)
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'A') {
+        e.preventDefault();
+        toggleActivityFeed();
+        return;
+      }
+
       // Escape: priority chain (always works)
       if (e.key === 'Escape') {
         if (commandPaletteOpen) {
           setCommandPaletteOpen(false);
+          return;
+        }
+        if (activityFeedOpen) {
+          setActivityFeedOpen(false);
           return;
         }
         if (selectedTask) {
@@ -82,6 +94,13 @@ export function useKeyboardShortcuts({
 
       // Skip remaining shortcuts if modal is open
       if (selectedTask) return;
+
+      // a: toggle activity feed (works on all tabs, when no modal open)
+      if (e.key === 'a' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        toggleActivityFeed();
+        return;
+      }
 
       // Only work on board tab
       if (activeTab !== 'board') return;
@@ -185,7 +204,7 @@ export function useKeyboardShortcuts({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedIds.size, selectedTask, activeTab, filteredTasks, commandPaletteOpen, focusedCardIndex, handlePlan, handleExecute, handleDismiss, COLUMNS, setCommandPaletteOpen, setSelectedTask, setSelectedIds]);
+  }, [selectedIds.size, selectedTask, activeTab, filteredTasks, commandPaletteOpen, activityFeedOpen, focusedCardIndex, handlePlan, handleExecute, handleDismiss, COLUMNS, setCommandPaletteOpen, setSelectedTask, setSelectedIds, toggleActivityFeed, setActivityFeedOpen]);
 
   return { focusedCardIndex, focusedTaskId, COLUMNS };
 }
