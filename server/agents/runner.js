@@ -404,6 +404,8 @@ export async function runGeneration(project, templateId, modelId, promptContent)
       status: 'success',
       costUsd: costData.costUsd || null,
       durationMs: costData.durationMs || null,
+      summary: `Generated ${createdTasks.length} task(s)${skipped ? ` (${skipped} duplicates skipped)` : ''}`,
+      extra: { taskCount: createdTasks.length, skippedDuplicates: skipped },
     });
 
     return createdTasks;
@@ -425,6 +427,7 @@ export async function runGeneration(project, templateId, modelId, promptContent)
       status: 'failed',
       costUsd: null,
       durationMs: null,
+      summary: `Generation failed: ${err.message}`,
     });
     throw err;
   } finally {
@@ -503,6 +506,7 @@ export async function runPlanning(task, modelId) {
       status: 'success',
       costUsd: planningCost || null,
       durationMs: costData.durationMs || null,
+      summary: `Planned task: ${task.title}`,
     });
 
     // Run post-planning hooks
@@ -532,6 +536,7 @@ export async function runPlanning(task, modelId) {
         status: 'failed',
         costUsd: null,
         durationMs: null,
+        summary: `Planning failed for: ${task.title}`,
       });
       emitNotification('task:failed', {
         projectId: project.id,
@@ -653,6 +658,8 @@ export async function runRanking(project, modelId) {
       status: 'success',
       costUsd: costData.costUsd || null,
       durationMs: costData.durationMs || null,
+      summary: `Ranked ${rankedIds.length} tasks`,
+      extra: { rankedCount: rankedIds.length },
     });
 
     return { rankedIds, reasoning: reasoningMap, costUsd: costData.costUsd };
@@ -671,6 +678,7 @@ export async function runRanking(project, modelId) {
       status: 'failed',
       costUsd: null,
       durationMs: null,
+      summary: `Ranking failed: ${err.message}`,
     });
     throw err;
   } finally {
@@ -850,6 +858,8 @@ export async function runExecution(task, modelId, options = {}) {
       status: 'success',
       costUsd: executionCost || null,
       durationMs: costData.durationMs || null,
+      summary: `Executed task: ${task.title}`,
+      extra: { commitHash: result.commitHash || null },
     });
 
     // Notify dependents that they may now be unblocked
@@ -978,6 +988,8 @@ export async function runExecution(task, modelId, options = {}) {
             status: 'test-failed',
             costUsd: executionCost || null,
             durationMs: costData.durationMs || null,
+            summary: `Tests failed after executing: ${task.title}`,
+            extra: { passed: false, testSummary: testResult.summary },
           });
           emitNotification('test:failure', {
             projectId: project.id,
@@ -1060,6 +1072,7 @@ export async function runExecution(task, modelId, options = {}) {
       status: aborted ? 'aborted' : 'failed',
       costUsd: null,
       durationMs: null,
+      summary: aborted ? `Aborted: ${task.title}` : `Execution failed: ${task.title}`,
     });
     emitPluginEvent('execution:failed', { taskId: task.id, error: agentLog, aborted });
     emitNotification('task:failed', {
@@ -1217,6 +1230,8 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
       status: 'success',
       costUsd: executionCost || null,
       durationMs: costData.durationMs || null,
+      summary: `Executed task (worktree): ${task.title}`,
+      extra: { commitHash: result.commitHash || null },
     });
 
     // Run task validators
@@ -1265,6 +1280,7 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
       status: 'failed',
       costUsd: null,
       durationMs: null,
+      summary: `Execution failed (worktree): ${task.title}`,
     });
     emitPluginEvent('execution:failed', { taskId: task.id, error: agentLog, aborted: false });
     throw err;
@@ -1336,6 +1352,18 @@ export async function runTestSetup(project, testInfo, options = {}) {
       commitHash: result.commitHash || null,
       testCommand: result.testCommand || null,
     });
+    recordActivity({
+      eventType: 'setup-tests',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: costData.costUsd || null,
+      durationMs: costData.durationMs || null,
+      summary: `Test setup complete${result.testCommand ? `: ${result.testCommand}` : ''}`,
+      extra: { testCommand: result.testCommand || null },
+    });
 
     return result;
   } catch (err) {
@@ -1346,6 +1374,17 @@ export async function runTestSetup(project, testInfo, options = {}) {
     broadcast('setup-tests:failed', {
       projectId: project.id,
       error: err.message,
+    });
+    recordActivity({
+      eventType: 'setup-tests',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'failed',
+      costUsd: null,
+      durationMs: null,
+      summary: `Test setup failed: ${err.message}`,
     });
     throw err;
   } finally {

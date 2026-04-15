@@ -85,6 +85,7 @@ export const api = {
   replayTaskPhase: (taskId, phase) => request('POST', `/tasks/${taskId}/replay/${phase}`),
   getPlugins: () => request('GET', '/plugins'),
   getPluginCapabilities: () => request('GET', '/plugins/capabilities'),
+  getActivity: (limit) => request('GET', `/activity${limit ? `?limit=${limit}` : ''}`),
   getTaskLogMeta: (taskId) => request('GET', `/tasks/${taskId}/logs`),
   getTaskLog: async (taskId, phase) => {
     const res = await fetch(`${BASE}/tasks/${taskId}/logs/${phase}`);
