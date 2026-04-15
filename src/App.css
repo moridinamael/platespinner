@@ -444,6 +444,29 @@ html, body {
   flex: 1;
 }
 
+.activity-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.15s, background 0.15s;
+}
+
+.activity-badge:hover {
+  transform: scale(1.1);
+  background: var(--accent-hover, var(--accent));
+}
+
 /* ===== Status Dot & Tooltip ===== */
 .status-dot {
   width: 8px;

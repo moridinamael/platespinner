@@ -618,7 +618,8 @@ export function useTasks({ selectedProjectId, showToast }) {
               ? { ...t, status: 'done', commitHash: data.commitHash, agentLog: data.agentLog,
                   branch: data.branch || t.branch, baseBranch: data.baseBranch || t.baseBranch,
                   costUsd: data.costUsd != null ? (t.costUsd || 0) + data.costUsd : t.costUsd,
-                  tokenUsage: data.tokenUsage || t.tokenUsage }
+                  tokenUsage: data.tokenUsage || t.tokenUsage,
+                  completedAt: Date.now() }
               : t
           )
         );

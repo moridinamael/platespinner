@@ -20,6 +20,7 @@ import { useProjects } from './hooks/useProjects.js';
 import { useTasks } from './hooks/useTasks.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useActivityFeed } from './hooks/useActivityFeed.js';
+import { useProjectActivity } from './hooks/useProjectActivity.js';
 
 export default function App() {
   const { theme, toggleTheme } = useTheme();
@@ -82,6 +83,8 @@ export default function App() {
     dismissEntry,
     handleActivityWsEvent,
   } = useActivityFeed();
+
+  const { unreadCountByProject, markProjectSeen } = useProjectActivity(tasks, projects);
 
   const [activityFeedOpen, setActivityFeedOpen] = useState(false);
 
@@ -292,7 +295,8 @@ export default function App() {
   const handleSelectProject = useCallback((id) => {
     setSelectedProjectId(id);
     setActiveTab('board');
-  }, [setSelectedProjectId]);
+    if (id) markProjectSeen(id);
+  }, [setSelectedProjectId, markProjectSeen]);
 
   const handleClearTestResult = useCallback((id) => {
     setTestStatusMap((prev) => { const next = { ...prev }; delete next[id]; return next; });
@@ -337,6 +341,8 @@ export default function App() {
           onReorderProjects={handleReorderProjects}
           onShowToast={showToast}
           tasks={tasks}
+          unreadCountByProject={unreadCountByProject}
+          onMarkProjectSeen={markProjectSeen}
           theme={theme}
           onToggleTheme={toggleTheme}
           authRequired={authRequired}

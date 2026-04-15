@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { EFFORT_COLORS, formatCost } from '../utils.js';
 import Sparkline from './Sparkline.jsx';
 
-function SortableProjectItem({ project, isActive, isConfirming, statusColor, testStatusMap, railwayStatusMap, onSelect, onRemove, onConfirmStart, formatTimeAgo }) {
+function SortableProjectItem({ project, isActive, isConfirming, statusColor, testStatusMap, railwayStatusMap, onSelect, onRemove, onConfirmStart, formatTimeAgo, unreadCount, onActivityClick }) {
   const {
     attributes,
     listeners,
@@ -75,6 +75,18 @@ function SortableProjectItem({ project, isActive, isConfirming, statusColor, tes
           </span>
         </span>
         <span className="project-name">{p.name}</span>
+        {unreadCount > 0 && (
+          <span
+            className="activity-badge"
+            onClick={(e) => {
+              e.stopPropagation();
+              onActivityClick(project.id);
+            }}
+            title={`${unreadCount} new completion${unreadCount !== 1 ? 's' : ''}`}
+          >
+            {unreadCount}
+          </span>
+        )}
       </button>
       <button
         className={`project-remove${isConfirming ? ' confirming' : ''}`}
@@ -118,6 +130,8 @@ function Sidebar({
   onReorderProjects,
   onShowToast,
   tasks,
+  unreadCountByProject,
+  onMarkProjectSeen,
   theme,
   onToggleTheme,
   authRequired,
@@ -692,6 +706,11 @@ function Sidebar({
                     confirmTimerRef.current = setTimeout(() => setConfirmingProjectId(null), 3000);
                   }}
                   formatTimeAgo={formatTimeAgo}
+                  unreadCount={(unreadCountByProject && unreadCountByProject[p.id]) || 0}
+                  onActivityClick={(projectId) => {
+                    onSelectProject(projectId);
+                    if (onMarkProjectSeen) onMarkProjectSeen(projectId);
+                  }}
                 />
               ))}
             </SortableContext>
