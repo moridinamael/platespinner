@@ -18,6 +18,7 @@ import { runPostExecutionHooks, runPreExecutionHooks, runPostPlanningHooks, runT
 import { renderPRBody } from '../prUtils.js';
 import { trackPR, fetchPRStatus } from '../prStatus.js';
 import { findSimilarTasks, extractFilePaths, findFileConflicts } from '../similarity.js';
+import { recordActivity } from '../activityLog.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
 
@@ -394,6 +395,16 @@ export async function runGeneration(project, templateId, modelId, promptContent)
       costUsd: costData.costUsd,
     });
     emitPluginEvent('generation:completed', { projectId: project.id, taskCount: createdTasks.length });
+    recordActivity({
+      eventType: 'generation',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: costData.costUsd || null,
+      durationMs: costData.durationMs || null,
+    });
 
     return createdTasks;
   } catch (err) {
@@ -404,6 +415,16 @@ export async function runGeneration(project, templateId, modelId, promptContent)
     broadcast('generation:failed', {
       projectId: project.id,
       error: err.message,
+    });
+    recordActivity({
+      eventType: 'generation',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'failed',
+      costUsd: null,
+      durationMs: null,
     });
     throw err;
   } finally {
@@ -473,6 +494,16 @@ export async function runPlanning(task, modelId) {
       costUsd: existingCost + planningCost,
     });
     broadcast('planning:completed', { taskId: task.id, plan, plannedBy: modelId, costUsd: planningCost });
+    recordActivity({
+      eventType: 'planning',
+      taskId: task.id,
+      taskTitle: task.title,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: planningCost || null,
+      durationMs: costData.durationMs || null,
+    });
 
     // Run post-planning hooks
     try {
@@ -492,6 +523,16 @@ export async function runPlanning(task, modelId) {
     if (state.getTask(task.id)) {
       state.updateTask(task.id, { status: 'proposed', agentLog: err.message });
       broadcast('planning:failed', { taskId: task.id, error: err.message });
+      recordActivity({
+        eventType: 'planning',
+        taskId: task.id,
+        taskTitle: task.title,
+        projectId: project.id,
+        projectName: project.name,
+        status: 'failed',
+        costUsd: null,
+        durationMs: null,
+      });
       emitNotification('task:failed', {
         projectId: project.id,
         taskId: task.id,
@@ -603,6 +644,16 @@ export async function runRanking(project, modelId) {
       costUsd: costData.costUsd,
     });
     broadcast('tasks:reordered', { orderedIds: rankedIds });
+    recordActivity({
+      eventType: 'ranking',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: costData.costUsd || null,
+      durationMs: costData.durationMs || null,
+    });
 
     return { rankedIds, reasoning: reasoningMap, costUsd: costData.costUsd };
   } catch (err) {
@@ -611,6 +662,16 @@ export async function runRanking(project, modelId) {
       error: err.message, stack: err.stack?.slice(0, 2000),
     });
     broadcast('ranking:failed', { projectId: project.id, error: err.message });
+    recordActivity({
+      eventType: 'ranking',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'failed',
+      costUsd: null,
+      durationMs: null,
+    });
     throw err;
   } finally {
     compressReplayLog(project.id, 'ranking').catch(() => {});
@@ -780,6 +841,16 @@ export async function runExecution(task, modelId, options = {}) {
     // Exclude diff from broadcast to avoid large WebSocket payloads
     const { diff: _diff, ...broadcastUpdates } = updates;
     broadcast('execution:completed', { taskId: task.id, ...broadcastUpdates, result, costUsd: executionCost });
+    recordActivity({
+      eventType: 'execution',
+      taskId: task.id,
+      taskTitle: task.title,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: executionCost || null,
+      durationMs: costData.durationMs || null,
+    });
 
     // Notify dependents that they may now be unblocked
     const dependents = state.getDependents(task.id);
@@ -898,6 +969,16 @@ export async function runExecution(task, modelId, options = {}) {
             failureCount: newFailureCount,
             status: 'failed',
           });
+          recordActivity({
+            eventType: 'execution',
+            taskId: task.id,
+            taskTitle: task.title,
+            projectId: project.id,
+            projectName: project.name,
+            status: 'test-failed',
+            costUsd: executionCost || null,
+            durationMs: costData.durationMs || null,
+          });
           emitNotification('test:failure', {
             projectId: project.id,
             taskId: task.id,
@@ -970,6 +1051,16 @@ export async function runExecution(task, modelId, options = {}) {
       : `Execution failed (agent exited unexpectedly). The previous agent may have left partial changes in the working directory. Error: ${err.message}`;
     state.updateTask(task.id, { status: revertStatus, agentLog });
     broadcast('execution:failed', { taskId: task.id, error: agentLog, aborted, status: revertStatus });
+    recordActivity({
+      eventType: 'execution',
+      taskId: task.id,
+      taskTitle: task.title,
+      projectId: project.id,
+      projectName: project.name,
+      status: aborted ? 'aborted' : 'failed',
+      costUsd: null,
+      durationMs: null,
+    });
     emitPluginEvent('execution:failed', { taskId: task.id, error: agentLog, aborted });
     emitNotification('task:failed', {
       projectId: project.id,
@@ -1117,6 +1208,16 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     const updated = state.updateTask(task.id, updates);
     const { diff: _diff, ...broadcastUpdates } = updates;
     broadcast('execution:completed', { taskId: task.id, ...broadcastUpdates, result, costUsd: executionCost });
+    recordActivity({
+      eventType: 'execution',
+      taskId: task.id,
+      taskTitle: task.title,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: executionCost || null,
+      durationMs: costData.durationMs || null,
+    });
 
     // Run task validators
     try {
@@ -1155,6 +1256,16 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     const agentLog = `Execution failed in worktree: ${err.message}`;
     state.updateTask(task.id, { status: revertStatus, agentLog });
     broadcast('execution:failed', { taskId: task.id, error: agentLog, aborted: false, status: revertStatus });
+    recordActivity({
+      eventType: 'execution',
+      taskId: task.id,
+      taskTitle: task.title,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'failed',
+      costUsd: null,
+      durationMs: null,
+    });
     emitPluginEvent('execution:failed', { taskId: task.id, error: agentLog, aborted: false });
     throw err;
   } finally {

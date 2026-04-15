@@ -16,7 +16,9 @@ import * as state from './state.js';
 import { broadcast } from './ws.js';
 import { startDigestScheduler, stopDigestScheduler } from './digest.js';
 import pluginRoutes from './routes/plugins.js';
+import activityRoutes from './routes/activity.js';
 import { loadPlugins } from './plugins/loader.js';
+import { loadActivityLog } from './activityLog.js';
 import { rehydratePRTracking } from './prStatus.js';
 import { resolveAndValidate } from './netguard.js';
 
@@ -106,6 +108,7 @@ app.use('/api', agentRoutes);
 app.use('/api', autoclickerRoutes);
 app.use('/api', notificationRoutes);
 app.use('/api', pluginRoutes);
+app.use('/api', activityRoutes);
 
 // Proxy for iframe preview — strips X-Frame-Options / CSP frame-ancestors
 app.get('/api/proxy', async (req, res) => {
@@ -211,6 +214,7 @@ if (pluginResult.errors.length > 0) {
 }
 
 rehydratePRTracking();
+loadActivityLog();
 
 server.listen(PORT, HOST, () => {
   console.log(`Server running on http://${HOST}:${PORT}`);

@@ -8,6 +8,7 @@ import { parseJudgmentOutput, extractClaudeJsonOutput } from './parser.js';
 import { runGeneration, runPlanning, runExecution, spawnAgent } from './runner.js';
 import { writeReplayEvent, compressReplayLog } from './replay.js';
 import * as state from '../state.js';
+import { recordActivity } from '../activityLog.js';
 
 let orchestratorRunning = false;
 let activeProcessCount = 0;
@@ -120,6 +121,16 @@ async function _runProjectCycle(project) {
       durationMs: judgmentCost?.durationMs || null,
     });
     broadcast('autoclicker:decision', { projectId: project.id, decision, costUsd: judgmentCost?.costUsd || null });
+    recordActivity({
+      eventType: 'judgment',
+      taskId: decision.targetTaskId || null,
+      taskTitle: decision.targetTaskId ? state.getTask(decision.targetTaskId)?.title || null : null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: judgmentCost?.costUsd || null,
+      durationMs: judgmentCost?.durationMs || null,
+    });
 
     // Attribute judgment cost to target task when applicable
     if (judgmentCost?.costUsd && decision.targetTaskId) {
@@ -191,6 +202,16 @@ async function _runProjectCycle(project) {
     broadcast('autoclicker:cycle-complete', { projectId: project.id });
   } catch (err) {
     projectCycleStatus.set(project.id, 'idle');
+    recordActivity({
+      eventType: 'judgment',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'failed',
+      costUsd: null,
+      durationMs: null,
+    });
     throw err;
   } finally {
     activeProcessCount--;
