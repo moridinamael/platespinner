@@ -78,7 +78,7 @@ export default function App() {
   const [selectedTemplateId, setSelectedTemplateId] = useState('builtin:pareto-simple');
   const wsRef = useRef(null);
   // Batched progress updates for generation and setup-tests (flushed every ~200ms)
-  const pendingProgressRef = useRef({ generating: {}, setup: {} });
+  const pendingProgressRef = useRef({ generating: {}, setup: {}, ranking: {} });
   const flushTimerRef = useRef(null);
   // Log streaming buffer: taskId → accumulated log string
   const logBufferRef = useRef({});
@@ -92,7 +92,7 @@ export default function App() {
   });
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkInFlight, setBulkInFlight] = useState(false);
-  const [rankingInProgress, setRankingInProgress] = useState(false);
+  const [rankingMap, setRankingMap] = useState({});
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [focusedCardIndex, setFocusedCardIndex] = useState(-1);
   const [replayResults, setReplayResults] = useState({});
@@ -195,11 +195,14 @@ export default function App() {
     const pending = pendingProgressRef.current;
     const genUpdates = pending.generating;
     const setupUpdates = pending.setup;
+    const rankingUpdates = pending.ranking;
     pending.generating = {};
     pending.setup = {};
+    pending.ranking = {};
     const hasGen = Object.keys(genUpdates).length > 0;
     const hasSetup = Object.keys(setupUpdates).length > 0;
-    if (!hasGen && !hasSetup) return;
+    const hasRanking = Object.keys(rankingUpdates).length > 0;
+    if (!hasGen && !hasSetup && !hasRanking) return;
     startTransition(() => {
       if (hasGen) {
         setGeneratingMap(prev => {
@@ -214,6 +217,15 @@ export default function App() {
         setSetupMap(prev => {
           const next = { ...prev };
           for (const [pid, upd] of Object.entries(setupUpdates)) {
+            if (next[pid]) next[pid] = { ...next[pid], bytesReceived: upd.bytesReceived };
+          }
+          return next;
+        });
+      }
+      if (hasRanking) {
+        setRankingMap(prev => {
+          const next = { ...prev };
+          for (const [pid, upd] of Object.entries(rankingUpdates)) {
             if (next[pid]) next[pid] = { ...next[pid], bytesReceived: upd.bytesReceived };
           }
           return next;
@@ -264,6 +276,38 @@ export default function App() {
         });
         break;
       }
+      // --- Ranking ---
+      case 'ranking:started':
+        setRankingMap((prev) => ({
+          ...prev,
+          [data.projectId]: { startedAt: Date.now(), bytesReceived: 0 },
+        }));
+        break;
+      case 'ranking:progress':
+        pendingProgressRef.current.ranking[data.projectId] = { bytesReceived: data.bytesReceived };
+        scheduleFlush();
+        break;
+      case 'ranking:completed': {
+        delete pendingProgressRef.current.ranking[data.projectId];
+        setRankingMap((prev) => {
+          const next = { ...prev };
+          delete next[data.projectId];
+          return next;
+        });
+        const count = data.rankedCount || data.rankedIds?.length || 0;
+        showToast(`Ranked ${count} tasks${data.costUsd ? ` ($${data.costUsd.toFixed(4)})` : ''}`, 'success');
+        break;
+      }
+      case 'ranking:failed':
+        delete pendingProgressRef.current.ranking[data.projectId];
+        setRankingMap((prev) => {
+          const next = { ...prev };
+          delete next[data.projectId];
+          return next;
+        });
+        showToast(`Ranking failed: ${data.error}`, 'error', 5000);
+        break;
+
       case 'task:created':
         setTasks((prev) => [...prev, data]);
         break;
@@ -953,17 +997,15 @@ export default function App() {
 
   const handleRankProposals = useCallback(async () => {
     const proposedTasks = filteredTasks.filter(t => t.status === 'proposed');
-    if (proposedTasks.length < 2 || rankingInProgress) return;
-    const projectIds = [...new Set(proposedTasks.map(t => t.projectId))];
-    setRankingInProgress(true);
+    if (proposedTasks.length < 2) return;
+    const projectIds = [...new Set(proposedTasks.map(t => t.projectId))].filter(pid => !rankingMap[pid]);
+    if (projectIds.length === 0) return;
     try {
       await Promise.all(projectIds.map(pid => api.rankProposals(pid)));
     } catch (err) {
       showToast(`Ranking failed: ${err.message}`, 'error');
-    } finally {
-      setRankingInProgress(false);
     }
-  }, [filteredTasks, rankingInProgress, showToast]);
+  }, [filteredTasks, rankingMap, showToast]);
 
   const handleExecuteAll = useCallback(async () => {
     const plannedIds = filteredTasks
@@ -1367,7 +1409,7 @@ export default function App() {
               onRetry={handleRetry}
               blockedTaskIds={blockedTaskIds}
               onRankProposals={handleRankProposals}
-              rankingInProgress={rankingInProgress}
+              rankingMap={rankingMap}
             />
             {selectedIds.size > 0 && (
               <BulkActionBar
@@ -1433,6 +1475,7 @@ export default function App() {
         tasks={tasks}
         generatingMap={generatingMap}
         setupMap={setupMap}
+        rankingMap={rankingMap}
         models={models}
         agentCensus={agentCensus}
       />

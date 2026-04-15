@@ -598,6 +598,7 @@ export async function runRanking(project, modelId) {
     broadcast('ranking:completed', {
       projectId: project.id,
       rankedIds,
+      rankedCount: rankedIds.length,
       reasoning: reasoningMap,
       costUsd: costData.costUsd,
     });

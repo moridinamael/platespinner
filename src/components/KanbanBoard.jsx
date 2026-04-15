@@ -11,7 +11,7 @@ const COLUMNS = [
   { key: 'failed', title: 'Failed', statuses: ['failed'] },
 ];
 
-function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, onMergePR, models, selectedIds, onToggleSelect, filterActive, onPlanAll, onExecuteAll, focusedTaskId, onReorderTasks, onMoveTask, onRetry, blockedTaskIds, onRankProposals, rankingInProgress }) {
+function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, onMergePR, models, selectedIds, onToggleSelect, filterActive, onPlanAll, onExecuteAll, focusedTaskId, onReorderTasks, onMoveTask, onRetry, blockedTaskIds, onRankProposals, rankingMap }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -126,7 +126,7 @@ function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecut
             onRetry={onRetry}
             blockedTaskIds={blockedTaskIds}
             onRankProposals={onRankProposals}
-            rankingInProgress={rankingInProgress}
+            rankingMap={rankingMap}
           />
         ))}
       </div>

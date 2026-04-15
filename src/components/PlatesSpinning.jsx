@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 
-export default function PlatesSpinning({ tasks, generatingMap, setupMap, models }) {
+export default function PlatesSpinning({ tasks, generatingMap, setupMap, rankingMap, models }) {
   const counts = useMemo(() => {
-    const byType = { generating: 0, planning: 0, executing: 0, setup: 0 };
+    const byType = { generating: 0, planning: 0, executing: 0, setup: 0, ranking: 0 };
     const byProvider = { claude: 0, gemini: 0, codex: 0 };
 
     // Generating: count entries in generatingMap
@@ -27,10 +27,14 @@ export default function PlatesSpinning({ tasks, generatingMap, setupMap, models 
     byType.setup = Object.keys(setupMap).length;
     byProvider.claude += byType.setup;
 
-    const total = byType.generating + byType.planning + byType.executing + byType.setup;
+    // Ranking: count entries in rankingMap
+    byType.ranking = Object.keys(rankingMap || {}).length;
+    byProvider.claude += byType.ranking;
+
+    const total = byType.generating + byType.planning + byType.executing + byType.setup + byType.ranking;
 
     return { total, byType, byProvider };
-  }, [tasks, generatingMap, setupMap, models]);
+  }, [tasks, generatingMap, setupMap, rankingMap, models]);
 
   return (
     <div className={`plates-spinning ${counts.total > 0 ? 'plates-active' : 'plates-idle'}`}>
@@ -84,6 +88,12 @@ export default function PlatesSpinning({ tasks, generatingMap, setupMap, models 
             <div className="plates-tooltip-row">
               <span className="plates-tooltip-label">Setup</span>
               <span className="plates-tooltip-value">{counts.byType.setup}</span>
+            </div>
+          )}
+          {counts.byType.ranking > 0 && (
+            <div className="plates-tooltip-row">
+              <span className="plates-tooltip-label">Ranking</span>
+              <span className="plates-tooltip-value">{counts.byType.ranking}</span>
             </div>
           )}
         </div>

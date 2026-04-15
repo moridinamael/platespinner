@@ -3,7 +3,8 @@ import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import Card from './Card.jsx';
 
-function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, onMergePR, models, selectedIds, onToggleSelect, filterActive, columnKey, onPlanAll, onExecuteAll, focusedTaskId, onRetry, blockedTaskIds, onRankProposals, rankingInProgress }) {
+function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, onMergePR, models, selectedIds, onToggleSelect, filterActive, columnKey, onPlanAll, onExecuteAll, focusedTaskId, onRetry, blockedTaskIds, onRankProposals, rankingMap }) {
+  const rankingInProgress = tasks.some(t => rankingMap[t.projectId]);
   const executingTasks = tasks.filter(t => t.status !== 'queued');
   const queuedTasks = tasks.filter(t => t.status === 'queued')
     .sort((a, b) => (a.queuePosition ?? Infinity) - (b.queuePosition ?? Infinity) || (a.createdAt || 0) - (b.createdAt || 0));
