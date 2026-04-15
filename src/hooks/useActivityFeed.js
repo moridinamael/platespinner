@@ -58,6 +58,7 @@ export function useActivityFeed() {
   return {
     activities: visibleActivities,
     unreadCount,
+    lastSeenTimestamp,
     markAllRead,
     dismissEntry,
     handleActivityWsEvent,

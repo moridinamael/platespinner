@@ -7,6 +7,7 @@ import KanbanBoard from './components/KanbanBoard.jsx';
 import BulkActionBar from './components/BulkActionBar.jsx';
 import CardModal from './components/CardModal.jsx';
 import PlatesSpinning from './components/PlatesSpinning.jsx';
+import ActivityFeed from './components/ActivityFeed.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import AnalyticsDashboard from './components/AnalyticsDashboard.jsx';
@@ -76,10 +77,20 @@ export default function App() {
   const {
     activities,
     unreadCount,
+    lastSeenTimestamp,
     markAllRead,
     dismissEntry,
     handleActivityWsEvent,
   } = useActivityFeed();
+
+  const [activityFeedOpen, setActivityFeedOpen] = useState(false);
+
+  const toggleActivityFeed = useCallback(() => {
+    setActivityFeedOpen(prev => {
+      if (!prev) markAllRead();
+      return !prev;
+    });
+  }, [markAllRead]);
 
   // App-level UI state
   const [activeTab, setActiveTab] = useState('board');
@@ -467,6 +478,28 @@ export default function App() {
           blockedTaskIds={blockedTaskIds}
         />
       </ErrorBoundary>
+      <button className="activity-bell" onClick={toggleActivityFeed} title="Activity feed">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+        {unreadCount > 0 && (
+          <span className="activity-bell-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+        )}
+      </button>
+      <ActivityFeed
+        isOpen={activityFeedOpen}
+        activities={activities}
+        lastSeenTimestamp={lastSeenTimestamp}
+        onClose={() => setActivityFeedOpen(false)}
+        onSelectTask={(task) => { setSelectedTask(task); setActivityFeedOpen(false); }}
+        onExecute={handleExecute}
+        onPlan={handlePlan}
+        onRetry={handleRetry}
+        onMarkAllRead={markAllRead}
+        onDismissEntry={dismissEntry}
+        tasks={tasks}
+      />
       <PlatesSpinning
         tasks={tasks}
         generatingMap={generatingMap}

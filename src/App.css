@@ -4594,3 +4594,254 @@ html, body {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ===== Activity Bell ===== */
+.activity-bell {
+  position: fixed;
+  top: 16px;
+  right: 52px;
+  z-index: 90;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.activity-bell:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.activity-bell-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--contrast-text);
+  background: var(--red);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* ===== Activity Feed Panel ===== */
+.activity-feed {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  max-width: 100vw;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  animation: activity-slide-in 0.2s ease-out;
+}
+
+@keyframes activity-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.activity-feed-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.activity-feed-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+  flex: 1;
+}
+
+.activity-feed-clear {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.activity-feed-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.activity-feed-close:hover {
+  color: var(--text);
+}
+
+.activity-feed-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.activity-feed-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.activity-feed-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px;
+  transition: background 0.1s;
+  cursor: default;
+}
+
+.activity-feed-item:hover {
+  background: var(--surface-2);
+}
+
+.activity-feed-item.unread {
+  background: rgba(108, 138, 255, 0.05);
+}
+
+.activity-feed-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--contrast-text);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.activity-feed-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-feed-task-title {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-feed-task-title:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.activity-feed-task-title--static {
+  cursor: default;
+}
+
+.activity-feed-task-title--static:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.activity-feed-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.activity-feed-time {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.activity-feed-status {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.activity-feed-status-success {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--green);
+}
+
+.activity-feed-status-failed {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--red);
+}
+
+.activity-feed-suggested {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  font-style: italic;
+}
+
+.activity-feed-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.activity-feed-actions .btn-sm {
+  font-size: 11px;
+  padding: 3px 10px;
+}
+
+.activity-feed-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+}
+
+.activity-feed-item:hover .activity-feed-dismiss {
+  opacity: 1;
+}
+
+.activity-feed-dismiss:hover {
+  color: var(--red);
+}
