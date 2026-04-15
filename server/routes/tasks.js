@@ -6,7 +6,7 @@ import * as state from '../state.js';
 import { LOGS_DIR } from '../state.js';
 import { broadcast } from '../ws.js';
 import { toWSLPath } from '../paths.js';
-import { runGeneration, runExecution, runPlanning, spawnAgent, extractCostData } from '../agents/runner.js';
+import { runGeneration, runExecution, runPlanning, spawnAgent, extractCostData, checkBudget } from '../agents/runner.js';
 import { readReplayLog, getReplayMeta } from '../agents/replay.js';
 import { buildGenerationCommand } from '../agents/cli.js';
 import { emitNotification } from '../notifications.js';
@@ -215,21 +215,20 @@ router.post('/tasks/:id/execute',
 
   // Check budget before execution
   const project = state.getProject(task.projectId);
-  if (project && project.budgetLimitUsd != null) {
-    const projectTasks = state.getTasks(task.projectId);
-    const totalSpent = projectTasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
-    if (totalSpent >= project.budgetLimitUsd) {
+  if (project) {
+    const budget = checkBudget(project);
+    if (!budget.allowed) {
       emitNotification('budget:exceeded', {
         projectId: project.id,
         taskId: task.id,
         taskTitle: task.title,
-        totalSpent,
-        limit: project.budgetLimitUsd,
+        totalSpent: budget.totalSpent,
+        limit: budget.limit,
       });
       return res.status(400).json({
         error: 'Budget limit exceeded',
-        totalSpent,
-        budgetLimit: project.budgetLimitUsd,
+        totalSpent: budget.totalSpent,
+        budgetLimit: budget.limit,
       });
     }
   }
@@ -609,11 +608,7 @@ router.post('/tasks/batch',
 
       // Budget check
       const project = state.getProject(task.projectId);
-      if (project && project.budgetLimitUsd != null) {
-        const projectTasks = state.getTasks(task.projectId);
-        const totalSpent = projectTasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
-        if (totalSpent >= project.budgetLimitUsd) continue; // skip over-budget tasks
-      }
+      if (project && !checkBudget(project).allowed) continue; // skip over-budget tasks
 
       if (!state.lockProject(task.projectId)) {
         state.updateTask(task.id, { status: 'queued', executedBy: modelId || null });

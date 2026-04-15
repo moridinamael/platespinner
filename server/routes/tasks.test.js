@@ -81,6 +81,7 @@ vi.mock('../agents/runner.js', () => ({
   runPlanning: vi.fn(async () => {}),
   spawnAgent: vi.fn(() => ({ promise: Promise.resolve('') })),
   extractCostData: vi.fn(() => ({})),
+  checkBudget: vi.fn(() => ({ allowed: true })),
 }));
 
 vi.mock('../agents/replay.js', () => ({
@@ -110,7 +111,7 @@ vi.mock('../paths.js', () => ({
 import router from './tasks.js';
 import * as state from '../state.js';
 import { broadcast } from '../ws.js';
-import { runGeneration, runExecution } from '../agents/runner.js';
+import { runGeneration, runExecution, checkBudget } from '../agents/runner.js';
 import { emitNotification } from '../notifications.js';
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -311,7 +312,7 @@ describe('POST /api/tasks/:id/execute', () => {
     const task = makeTask({ id: TASK_ID, status: 'planned' });
     state.getTask.mockReturnValue(task);
     state.getProject.mockReturnValue(makeProject({ budgetLimitUsd: 10 }));
-    state.getTasks.mockReturnValue([makeTask({ costUsd: 15 })]);
+    checkBudget.mockReturnValue({ allowed: false, totalSpent: 15, limit: 10 });
 
     const res = await request(app)
       .post(`/api/tasks/${TASK_ID}/execute`);

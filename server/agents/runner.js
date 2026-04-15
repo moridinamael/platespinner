@@ -274,7 +274,7 @@ function extractCostData(stdout, stdinData, modelId) {
   };
 }
 
-function checkBudget(project) {
+export function checkBudget(project) {
   if (project.budgetLimitUsd == null) return { allowed: true };
   const projectTasks = state.getTasks(project.id);
   const totalSpent = projectTasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
