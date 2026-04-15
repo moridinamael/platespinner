@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { api } from './api.js';
 import Sidebar from './components/Sidebar.jsx';
 import GenerateBar from './components/GenerateBar.jsx';
@@ -167,102 +167,17 @@ export default function App() {
     }).catch(console.error);
   }, []);
 
-  // Composed WebSocket handler
-  const handleWsMessage = useCallback((event, data) => {
-    handleProjectWsEvent(event, data);
-    handleTaskWsEvent(event, data);
-
-    switch (event) {
-      case 'project:removed':
-        setTestStatusMap((prev) => { const next = { ...prev }; delete next[data.id]; return next; });
-        setRailwayStatusMap((prev) => { const next = { ...prev }; delete next[data.id]; return next; });
-        break;
-      case 'project:test-started':
-        startTransition(() => {
-          setTestStatusMap((prev) => ({
-            ...prev,
-            [data.projectId]: { running: true },
-          }));
-        });
-        break;
-      case 'project:test-completed':
-        startTransition(() => {
-          setTestStatusMap((prev) => ({
-            ...prev,
-            [data.projectId]: {
-              running: false,
-              result: { passed: data.passed, summary: data.summary, output: data.output, checkedAt: Date.now() },
-            },
-          }));
-        });
-        break;
-      case 'project:railway-checking':
-        startTransition(() => {
-          setRailwayStatusMap((prev) => ({
-            ...prev,
-            [data.projectId]: { ...prev[data.projectId], status: 'checking' },
-          }));
-        });
-        break;
-      case 'project:railway-status':
-        startTransition(() => {
-          setRailwayStatusMap((prev) => ({
-            ...prev,
-            [data.projectId]: {
-              status: data.healthy ? 'healthy' : 'failed',
-              message: data.message,
-              checkedAt: data.timestamp || Date.now(),
-            },
-          }));
-        });
-        break;
-      case 'agents:census':
-        startTransition(() => {
-          setAgentCensus(data);
-        });
-        break;
-      case 'notification': {
-        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-          const titleMap = {
-            'task:completed': 'Task Completed',
-            'task:failed': 'Task Failed',
-            'all-tasks:done': 'All Tasks Done!',
-            'test:failure': 'Tests Failed',
-            'budget:exceeded': 'Budget Exceeded',
-            'cost:threshold-exceeded': 'Cost Threshold Exceeded',
-            'test:notification': 'Test Notification',
-          };
-          const title = titleMap[data.type] || 'PlateSpinner Notification';
-          const body = data.taskTitle || data.summary || data.message || '';
-          new Notification(title, {
-            body: `${data.projectName}: ${body}`,
-            tag: `kanban-${data.type}-${data.taskId || data.projectId}`,
-            requireInteraction: data.type === 'all-tasks:done',
-          });
-        }
-        break;
-      }
-      case 'notification-settings:updated':
-        if (!data.projectId || data.projectId === 'global') {
-          setNotificationSettings(data.settings);
-        }
-        break;
-      case 'autoclicker:started':
-      case 'autoclicker:stopped':
-      case 'autoclicker:decision':
-      case 'autoclicker:phase':
-      case 'autoclicker:cycle-complete':
-      case 'autoclicker:error':
-      case 'autoclicker:project-paused':
-      case 'autoclicker:project-disabled':
-      case 'autoclicker:merge-conflict':
-      case 'autoclicker:merge-complete':
-        api.getAutoclickerStatus().then(setAutoclickerStatus).catch(err => console.warn('Failed to refresh autoclicker status:', err));
-        break;
-    }
-  }, [handleProjectWsEvent, handleTaskWsEvent]);
-
-  useWebSocket(handleWsMessage);
+  // WebSocket — delegates task/project events to sub-hooks, handles app-level events
+  useWebSocket({
+    handleProjectWsEvent,
+    handleTaskWsEvent,
+    setTestStatusMap,
+    setRailwayStatusMap,
+    setAgentCensus,
+    setAutoclickerStatus,
+    setNotificationSettings,
+    showToast,
+  });
 
   // Remaining app-level callbacks
   const handleGenerate = useCallback(async (modelId, promptContent) => {
