@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, memo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { api } from '../api.js';
 import { getModelLabel, getModelProvider, formatCost, formatTokens, formatLogSize, escapeHtml, sanitizeAnsiHtml } from '../utils.js';
@@ -19,7 +19,7 @@ function formatEventType(type) {
   }
 }
 
-function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, onMergePR, models, streamingLog, logStreamVersion, replayResult, allTasks, blockedTaskIds }) {
+function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, onMergePR, models, streamingLog, logStreamVersion, replayResult, allTasks, blockedTaskIds, onShowToast }) {
   if (!task) return null;
 
   const isProposed = task.status === 'proposed';
@@ -70,6 +70,11 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const [draftEffort, setDraftEffort] = useState('medium');
   const [draftPlan, setDraftPlan] = useState('');
   const [draftDependencies, setDraftDependencies] = useState([]);
+
+  // Stable toast callback so DependencyEditor's memo is preserved
+  const handleDependencyReject = useCallback((msg) => {
+    if (onShowToast) onShowToast(msg, 'error', 4000);
+  }, [onShowToast]);
 
   // Reset state on task change
   useEffect(() => {
@@ -478,6 +483,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
                   allTasks={allTasks || []}
                   dependencies={draftDependencies}
                   onChange={setDraftDependencies}
+                  onReject={handleDependencyReject}
                 />
               ) : (
                 <>

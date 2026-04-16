@@ -483,6 +483,7 @@ export default function App() {
           replayResult={selectedTask ? replayResults[selectedTask.id] : null}
           allTasks={tasks}
           blockedTaskIds={blockedTaskIds}
+          onShowToast={showToast}
         />
       </ErrorBoundary>
       <button className="activity-bell" onClick={toggleActivityFeed} title="Activity feed">

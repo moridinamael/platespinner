@@ -270,6 +270,68 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('No editable fields provided');
   });
+
+  it('rejects self-dependency', async () => {
+    state.getTask.mockImplementation(id =>
+      id === TASK_ID ? makeTask({ id: TASK_ID, status: 'proposed' }) : null
+    );
+
+    const res = await request(app)
+      .patch(`/api/tasks/${TASK_ID}`)
+      .send({ dependencies: [TASK_ID] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/cannot depend on itself/i);
+  });
+
+  it('rejects cross-project dependency', async () => {
+    const sourceTask = makeTask({ id: TASK_ID, status: 'proposed', projectId: PROJECT_ID });
+    const otherProjectDepId = 'cccccccc-1111-2222-3333-444444444444';
+    const otherProjectDep = makeTask({ id: otherProjectDepId, projectId: 'ffffffff-0000-0000-0000-000000000000' });
+    state.getTask.mockImplementation(id => {
+      if (id === TASK_ID) return sourceTask;
+      if (id === otherProjectDepId) return otherProjectDep;
+      return null;
+    });
+
+    const res = await request(app)
+      .patch(`/api/tasks/${TASK_ID}`)
+      .send({ dependencies: [otherProjectDepId] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/another project|cross-project/i);
+  });
+
+  it('rejects cycle-creating dependency', async () => {
+    const depId = 'dddddddd-1111-2222-3333-444444444444';
+    const sourceTask = makeTask({ id: TASK_ID, status: 'proposed' });
+    const depTask = makeTask({ id: depId });
+    state.getTask.mockImplementation(id => {
+      if (id === TASK_ID) return sourceTask;
+      if (id === depId) return depTask;
+      return null;
+    });
+    state.wouldCreateCycle.mockReturnValue(true);
+
+    const res = await request(app)
+      .patch(`/api/tasks/${TASK_ID}`)
+      .send({ dependencies: [depId] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/cycle/i);
+  });
+
+  it('rejects unknown dependency task', async () => {
+    const sourceTask = makeTask({ id: TASK_ID, status: 'proposed' });
+    state.getTask.mockImplementation(id => (id === TASK_ID ? sourceTask : null));
+
+    const res = await request(app)
+      .patch(`/api/tasks/${TASK_ID}`)
+      .send({ dependencies: ['eeeeeeee-1111-2222-3333-444444444444'] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not found/i);
+  });
 });
 
 // === POST /api/tasks/:id/execute ===

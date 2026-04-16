@@ -1,6 +1,7 @@
 import { memo, useMemo } from 'react';
+import { wouldCreateCycle } from '../utils/dependencyValidation.js';
 
-function DependencyEditor({ task, allTasks, dependencies, onChange }) {
+function DependencyEditor({ task, allTasks, dependencies, onChange, onReject }) {
   // Filter to same-project tasks, excluding self
   const availableTasks = useMemo(() => {
     return allTasks.filter(t =>
@@ -16,8 +17,35 @@ function DependencyEditor({ task, allTasks, dependencies, onChange }) {
       .filter(Boolean);
   }, [dependencies, allTasks]);
 
+  const reject = (msg) => {
+    if (onReject) onReject(msg);
+    else if (typeof console !== 'undefined') console.warn('[DependencyEditor] ' + msg);
+  };
+
   const addDependency = (depId) => {
     if (!depId || dependencies.includes(depId)) return;
+    const target = allTasks.find(t => t.id === depId);
+    if (!target) {
+      reject('Selected task no longer exists');
+      return;
+    }
+    if (target.id === task.id) {
+      reject('A task cannot depend on itself');
+      return;
+    }
+    if (target.projectId !== task.projectId) {
+      reject('Cannot depend on a task in another project');
+      return;
+    }
+    // Merge in-progress draft deps on the source so cycles against unsaved
+    // edits are still detected.
+    const tasksWithDraft = allTasks.map(t =>
+      t.id === task.id ? { ...t, dependencies } : t
+    );
+    if (wouldCreateCycle(task.id, depId, tasksWithDraft)) {
+      reject('Would create a dependency cycle');
+      return;
+    }
     onChange([...dependencies, depId]);
   };
 
