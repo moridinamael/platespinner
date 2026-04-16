@@ -1,10 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'fs';
 
-// Shared mock file handle — captures written data
-let lastWrittenData = null;
+// Per-collection writes: track last-written data keyed by the FINAL primary path.
+// The state module opens `<collection>.tmp.json`, writes to it, then renames it
+// to `<collection>.json`. We capture writes-per-temp-path at open/writeFile time
+// and map them to their final path at rename time.
+let lastWrittenData = null;           // last string handed to writeFile (any collection)
+const writesByFinal = new Map();      // primary path → last JSON written
+const pendingByTemp = new Map();      // temp path → last JSON pending rename
+let currentTempPath = null;
+
 const mockFileHandle = {
-  writeFile: vi.fn(async (data) => { lastWrittenData = data; }),
+  writeFile: vi.fn(async (data) => {
+    lastWrittenData = data;
+    if (currentTempPath) pendingByTemp.set(currentTempPath, data);
+  }),
   sync: vi.fn(async () => {}),
   close: vi.fn(async () => {}),
 };
@@ -14,7 +24,7 @@ vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    readFileSync: vi.fn(() => { throw new Error('ENOENT'); }),
+    readFileSync: vi.fn(() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }),
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
     renameSync: vi.fn(),
@@ -29,15 +39,30 @@ vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    open: vi.fn(async () => mockFileHandle),
+    open: vi.fn(async (path) => { currentTempPath = path; return mockFileHandle; }),
     mkdir: vi.fn(async () => {}),
-    rename: vi.fn(async () => {}),
+    rename: vi.fn(async (from, to) => {
+      const data = pendingByTemp.get(from);
+      if (data !== undefined) writesByFinal.set(to, data);
+      pendingByTemp.delete(from);
+    }),
     copyFile: vi.fn(async () => {}),
   };
 });
 
 import { open, rename, copyFile } from 'fs/promises';
 import * as state from './state.js';
+
+// Helpers to query the per-collection write log.
+function getWrittenCollection(collectionFileName) {
+  for (const [path, data] of writesByFinal) {
+    if (path.endsWith(`/${collectionFileName}`) || path.endsWith(`\\${collectionFileName}`)) return data;
+  }
+  return undefined;
+}
+function renamedPaths() {
+  return rename.mock.calls.map(c => c[1]);
+}
 
 // --- Helpers (same as state.recovery.test.js) ---
 
@@ -105,32 +130,49 @@ function loadWithState(stateJson) {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  readFileSync.mockImplementation(() => { throw new Error('ENOENT'); });
+  readFileSync.mockImplementation(() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); });
   state.load(); // reset to empty
   lastWrittenData = null;
+  writesByFinal.clear();
+  pendingByTemp.clear();
+  currentTempPath = null;
   mockFileHandle.writeFile.mockClear();
-  mockFileHandle.writeFile.mockImplementation(async (data) => { lastWrittenData = data; });
+  mockFileHandle.writeFile.mockImplementation(async (data) => {
+    lastWrittenData = data;
+    if (currentTempPath) pendingByTemp.set(currentTempPath, data);
+  });
   mockFileHandle.sync.mockClear();
   mockFileHandle.sync.mockResolvedValue(undefined);
   mockFileHandle.close.mockClear();
   mockFileHandle.close.mockResolvedValue(undefined);
   open.mockClear();
-  open.mockResolvedValue(mockFileHandle);
+  open.mockImplementation(async (path) => { currentTempPath = path; return mockFileHandle; });
   rename.mockClear();
-  rename.mockResolvedValue(undefined);
+  rename.mockImplementation(async (from, to) => {
+    const data = pendingByTemp.get(from);
+    if (data !== undefined) writesByFinal.set(to, data);
+    pendingByTemp.delete(from);
+  });
   copyFile.mockClear();
   copyFile.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
   // Reset mocks to working state so flushState doesn't fail
-  mockFileHandle.writeFile.mockImplementation(async (data) => { lastWrittenData = data; });
+  mockFileHandle.writeFile.mockImplementation(async (data) => {
+    lastWrittenData = data;
+    if (currentTempPath) pendingByTemp.set(currentTempPath, data);
+  });
   mockFileHandle.sync.mockResolvedValue(undefined);
   mockFileHandle.close.mockResolvedValue(undefined);
-  open.mockResolvedValue(mockFileHandle);
-  rename.mockResolvedValue(undefined);
+  open.mockImplementation(async (path) => { currentTempPath = path; return mockFileHandle; });
+  rename.mockImplementation(async (from, to) => {
+    const data = pendingByTemp.get(from);
+    if (data !== undefined) writesByFinal.set(to, data);
+    pendingByTemp.delete(from);
+  });
   copyFile.mockResolvedValue(undefined);
-  // Flush any pending writes to reset _dirty/_debounceTimer module state
+  // Flush any pending writes to reset _dirtyCollections/_debounceTimer state.
   await state.flushState();
   vi.useRealTimers();
 });
@@ -189,23 +231,22 @@ describe('serialization fidelity', () => {
     state.updateTask(t1.id, { status: 'planned', plan: 'my plan' });
 
     await vi.advanceTimersByTimeAsync(500);
-    const data = JSON.parse(lastWrittenData);
 
-    expect(data.projects).toHaveLength(1);
-    expect(data.projects[0].name).toBe('My Project');
-    expect(data.projects[0].path).toBe('/my/project');
+    // Each collection is now persisted to its own file.
+    const projectsJson = JSON.parse(getWrittenCollection('projects.json'));
+    const tasksJson = JSON.parse(getWrittenCollection('tasks.json'));
 
-    expect(data.tasks).toHaveLength(2);
-    const titles = data.tasks.map(t => t.title).sort();
+    expect(projectsJson).toHaveLength(1);
+    expect(projectsJson[0].name).toBe('My Project');
+    expect(projectsJson[0].path).toBe('/my/project');
+
+    expect(tasksJson).toHaveLength(2);
+    const titles = tasksJson.map(t => t.title).sort();
     expect(titles).toEqual(['Task One', 'Task Two']);
 
-    const serializedT1 = data.tasks.find(t => t.id === t1.id);
+    const serializedT1 = tasksJson.find(t => t.id === t1.id);
     expect(serializedT1.status).toBe('planned');
     expect(serializedT1.plan).toBe('my plan');
-
-    expect(data.executionQueues).toBeDefined();
-    expect(data.autoclicker).toBeDefined();
-    expect(data.autoclicker.enabled).toBe(false);
   });
 
   it('persisted JSON includes execution queue state', async () => {
@@ -214,18 +255,40 @@ describe('serialization fidelity', () => {
     state.enqueueTask(proj.id, task.id);
 
     await vi.advanceTimersByTimeAsync(500);
-    const data = JSON.parse(lastWrittenData);
+    const queuesJson = JSON.parse(getWrittenCollection('executionQueues.json'));
 
-    expect(data.executionQueues[proj.id]).toEqual([task.id]);
+    expect(queuesJson[proj.id]).toEqual([task.id]);
   });
 
   it('persisted JSON includes notification settings', async () => {
     state.updateNotificationSettings(null, { enabled: true });
 
     await vi.advanceTimersByTimeAsync(500);
-    const data = JSON.parse(lastWrittenData);
+    const settingsJson = JSON.parse(getWrittenCollection('notificationSettings.json'));
 
-    expect(data.notificationSettings.global.enabled).toBe(true);
+    expect(settingsJson.global.enabled).toBe(true);
+  });
+
+  it('a pure task update only rewrites tasks.json (incremental-write invariant)', async () => {
+    // Seed a project so projects.json already exists and is clean.
+    const proj = state.addProject({ name: 'P', path: '/p' });
+    await vi.advanceTimersByTimeAsync(500);
+
+    rename.mockClear();
+    copyFile.mockClear();
+
+    // A task-only mutation should dirty only 'tasks' (and executionQueues
+    // for queue-touching ops — not triggered here).
+    const t = state.addTask({ projectId: proj.id, title: 'T' });
+    state.updateTask(t.id, { status: 'planned', plan: 'p' });
+    await vi.advanceTimersByTimeAsync(500);
+
+    const paths = renamedPaths();
+    expect(paths.some(p => p.endsWith('tasks.json'))).toBe(true);
+    expect(paths.some(p => p.endsWith('projects.json'))).toBe(false);
+    expect(paths.some(p => p.endsWith('promptTemplates.json'))).toBe(false);
+    expect(paths.some(p => p.endsWith('notificationSettings.json'))).toBe(false);
+    expect(paths.some(p => p.endsWith('autoclickerConfig.json'))).toBe(false);
   });
 });
 

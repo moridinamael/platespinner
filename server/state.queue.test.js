@@ -5,7 +5,7 @@ vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    readFileSync: vi.fn(() => { throw new Error('ENOENT'); }),
+    readFileSync: vi.fn(() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }),
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
     renameSync: vi.fn(),

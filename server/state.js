@@ -6,10 +6,23 @@ import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '..', 'data');
-const DATA_FILE = join(DATA_DIR, 'state.json');
-const BACKUP_FILE = join(DATA_DIR, 'state.backup.json');
-const TEMP_FILE = join(DATA_DIR, 'state.tmp.json');
+// Legacy monolithic state (kept for read-only migration on first load).
+// After migration the legacy files stay on disk as a rollback safety net.
+const LEGACY_FILE = join(DATA_DIR, 'state.json');
+const LEGACY_BACKUP = join(DATA_DIR, 'state.backup.json');
 export const LOGS_DIR = join(DATA_DIR, 'logs');
+
+// Per-collection file layout. Each entry defines primary/backup/temp paths.
+const COLLECTIONS = {
+  projects:             { primary: join(DATA_DIR, 'projects.json'),             backup: join(DATA_DIR, 'projects.backup.json'),             temp: join(DATA_DIR, 'projects.tmp.json') },
+  tasks:                { primary: join(DATA_DIR, 'tasks.json'),                backup: join(DATA_DIR, 'tasks.backup.json'),                temp: join(DATA_DIR, 'tasks.tmp.json') },
+  promptTemplates:      { primary: join(DATA_DIR, 'promptTemplates.json'),      backup: join(DATA_DIR, 'promptTemplates.backup.json'),      temp: join(DATA_DIR, 'promptTemplates.tmp.json') },
+  notificationSettings: { primary: join(DATA_DIR, 'notificationSettings.json'), backup: join(DATA_DIR, 'notificationSettings.backup.json'), temp: join(DATA_DIR, 'notificationSettings.tmp.json') },
+  executionQueues:      { primary: join(DATA_DIR, 'executionQueues.json'),      backup: join(DATA_DIR, 'executionQueues.backup.json'),      temp: join(DATA_DIR, 'executionQueues.tmp.json') },
+  autoclickerConfig:    { primary: join(DATA_DIR, 'autoclickerConfig.json'),    backup: join(DATA_DIR, 'autoclickerConfig.backup.json'),    temp: join(DATA_DIR, 'autoclickerConfig.tmp.json') },
+  autoclickerAuditLog:  { primary: join(DATA_DIR, 'autoclickerAuditLog.json'),  backup: join(DATA_DIR, 'autoclickerAuditLog.backup.json'),  temp: join(DATA_DIR, 'autoclickerAuditLog.tmp.json') },
+};
+const COLLECTION_NAMES = Object.keys(COLLECTIONS);
 
 const projects = new Map();
 const tasks = new Map();
@@ -34,65 +47,83 @@ const autoclickerConsecutiveFailures = new Map(); // projectId → number
 
 // --- Persistence ---
 
-let _dirty = false;
+const _dirtyCollections = new Set();
 let _debounceTimer = null;
 let _writing = false;
 const DEBOUNCE_MS = 500;
 
-function _serialize() {
-  return JSON.stringify({
-    projects: [...projects.values()],
-    tasks: [...tasks.values()],
-    promptTemplates: [...promptTemplates.values()],
-    notificationSettings: Object.fromEntries(notificationSettings),
-    executionQueues: Object.fromEntries(executionQueues),
-    autoclicker: {
-      enabled: autoclickerConfig.enabled,
-      enabledProjects: [...autoclickerConfig.enabledProjects],
-      maxParallel: autoclickerConfig.maxParallel,
-      standoffSeconds: autoclickerConfig.standoffSeconds,
-    },
-    autoclickerAuditLog: autoclickerAuditLog,
-  }, null, 2);
-}
+// Per-collection serializers. Each returns the on-disk JSON string for that
+// collection in isolation — no nesting under a "data" envelope.
+const _serializers = {
+  projects:             () => JSON.stringify([...projects.values()], null, 2),
+  tasks:                () => JSON.stringify([...tasks.values()], null, 2),
+  promptTemplates:      () => JSON.stringify([...promptTemplates.values()], null, 2),
+  notificationSettings: () => JSON.stringify(Object.fromEntries(notificationSettings), null, 2),
+  executionQueues:      () => JSON.stringify(Object.fromEntries(executionQueues), null, 2),
+  autoclickerConfig:    () => JSON.stringify({
+    enabled: autoclickerConfig.enabled,
+    enabledProjects: [...autoclickerConfig.enabledProjects],
+    maxParallel: autoclickerConfig.maxParallel,
+    standoffSeconds: autoclickerConfig.standoffSeconds,
+  }, null, 2),
+  autoclickerAuditLog:  () => JSON.stringify(autoclickerAuditLog, null, 2),
+};
 
-function save() {
-  _dirty = true;
+// Mark one or more collections as dirty and schedule a debounced flush.
+// Calling save() with no args marks ALL collections dirty (conservative fallback).
+function save(...names) {
+  const toMark = names.length > 0 ? names : COLLECTION_NAMES;
+  for (const n of toMark) _dirtyCollections.add(n);
   if (!_debounceTimer) {
     _debounceTimer = setTimeout(_writeToDisk, DEBOUNCE_MS);
   }
 }
 
+async function _writeCollection(name) {
+  const paths = COLLECTIONS[name];
+  if (!paths) throw new Error(`Unknown collection: ${name}`);
+  const data = _serializers[name]();
+  const fh = await open(paths.temp, 'w');
+  try {
+    await fh.writeFile(data);
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+  // Copy current primary to backup as last-known-good (skip if no primary yet).
+  try {
+    await copyFile(paths.primary, paths.backup);
+  } catch {
+    // First write for this collection — no primary exists yet.
+  }
+  await rename(paths.temp, paths.primary);
+}
+
 async function _writeToDisk() {
   _debounceTimer = null;
-  if (!_dirty || _writing) return;
-  _dirty = false;
+  if (_dirtyCollections.size === 0 || _writing) return;
   _writing = true;
+  // Snapshot the dirty set and clear it. If mutations happen during the
+  // write, they'll re-add to _dirtyCollections and get picked up on the next
+  // debounce.
+  const toWrite = [..._dirtyCollections];
+  _dirtyCollections.clear();
+  const failed = [];
   try {
     await mkdir(DATA_DIR, { recursive: true });
-    const data = _serialize();
-    // Write to temp file, fsync, then atomic rename
-    const fh = await open(TEMP_FILE, 'w');
-    try {
-      await fh.writeFile(data);
-      await fh.sync();
-    } finally {
-      await fh.close();
+    for (const name of toWrite) {
+      try {
+        await _writeCollection(name);
+      } catch (err) {
+        console.error(`Failed to save collection '${name}':`, err.message);
+        failed.push(name);
+      }
     }
-    // Before replacing primary, copy current primary to backup (last-known-good)
-    try {
-      await copyFile(DATA_FILE, BACKUP_FILE);
-    } catch {
-      // No primary yet (first write) — skip backup
-    }
-    // Atomic rename: temp → primary
-    await rename(TEMP_FILE, DATA_FILE);
-  } catch (err) {
-    console.error('Failed to save state:', err.message);
-    _dirty = true; // mark dirty again so next debounce retries
   } finally {
+    // Re-mark any failed collections so the next debounce retries just them.
+    for (const n of failed) _dirtyCollections.add(n);
     _writing = false;
-    if (_dirty && !_debounceTimer) {
+    if (_dirtyCollections.size > 0 && !_debounceTimer) {
       _debounceTimer = setTimeout(_writeToDisk, DEBOUNCE_MS);
     }
   }
@@ -103,14 +134,11 @@ export async function flushState() {
     clearTimeout(_debounceTimer);
     _debounceTimer = null;
   }
-  if (_dirty || _writing) {
-    // If a write is in progress, wait for it, then check dirty again
-    while (_writing) {
-      await new Promise(r => setTimeout(r, 10));
-    }
-    if (_dirty) {
-      await _writeToDisk();
-    }
+  while (_writing) {
+    await new Promise(r => setTimeout(r, 10));
+  }
+  if (_dirtyCollections.size > 0) {
+    await _writeToDisk();
   }
 }
 
@@ -192,63 +220,127 @@ function _recoverTransientTasks() {
   if (recovered > 0) {
     executionQueues.clear();
     console.log(`Recovered ${recovered} task(s) stuck in transient states`);
-    save();
+    save('tasks', 'executionQueues');
+  }
+}
+
+function _readJsonWithBackup(name, primary, backup) {
+  // Returns parsed JSON from primary (preferred) or backup. Returns undefined
+  // if both are missing. Logs errors for corrupt files but continues falling
+  // through to backup — matching the legacy monolithic behavior per-collection.
+  try {
+    return JSON.parse(readFileSync(primary, 'utf-8'));
+  } catch (primaryErr) {
+    if (primaryErr.code !== 'ENOENT') {
+      console.error(`Corrupt primary ${name} file: ${primaryErr.message}`);
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(backup, 'utf-8'));
+      if (primaryErr.code !== 'ENOENT') {
+        console.warn(`Recovered ${name} from backup`);
+      }
+      return parsed;
+    } catch (backupErr) {
+      if (backupErr.code !== 'ENOENT') {
+        console.error(`Corrupt backup ${name} file: ${backupErr.message}`);
+      }
+      return undefined;
+    }
+  }
+}
+
+function _assignCollection(data, name, parsed) {
+  // Translate per-collection wire shape into the unified shape _hydrateFromData
+  // expects. (The on-disk shape is just the collection's value — no envelope.)
+  switch (name) {
+    case 'projects':             data.projects = parsed; break;
+    case 'tasks':                data.tasks = parsed; break;
+    case 'promptTemplates':      data.promptTemplates = parsed; break;
+    case 'notificationSettings': data.notificationSettings = parsed; break;
+    case 'executionQueues':      data.executionQueues = parsed; break;
+    case 'autoclickerConfig':    data.autoclicker = parsed; break;
+    case 'autoclickerAuditLog':  data.autoclickerAuditLog = parsed; break;
+  }
+}
+
+function _loadLegacyMonolith() {
+  // Read data/state.json (primary) falling back to data/state.backup.json.
+  // Returns null if neither is readable/parseable — matching legacy semantics.
+  try {
+    return JSON.parse(readFileSync(LEGACY_FILE, 'utf-8'));
+  } catch (primaryErr) {
+    if (primaryErr.code !== 'ENOENT') {
+      console.error(`Corrupt primary state file (${LEGACY_FILE}): ${primaryErr.message}`);
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(LEGACY_BACKUP, 'utf-8'));
+      if (primaryErr.code !== 'ENOENT') {
+        console.warn('Recovered state from backup file');
+      } else {
+        console.warn('Primary state file not found, loading from backup');
+      }
+      return parsed;
+    } catch (backupErr) {
+      if (backupErr.code !== 'ENOENT' && primaryErr.code !== 'ENOENT') {
+        console.error(`Backup state file also unusable: ${backupErr.message}`);
+        console.error('Starting with empty state — data may have been lost');
+      } else if (backupErr.code !== 'ENOENT') {
+        console.error(`Corrupt backup state file (${LEGACY_BACKUP}): ${backupErr.message}`);
+        console.error('Starting with empty state — data may have been lost');
+      }
+      return null;
+    }
   }
 }
 
 export function load() {
-  // Clear existing state so load() is safely re-callable (needed for tests)
+  // Clear existing state so load() is safely re-callable (needed for tests).
   projects.clear();
   tasks.clear();
   promptTemplates.clear();
   notificationSettings.clear();
   executionQueues.clear();
+  autoclickerAuditLog.length = 0;
+  autoclickerConfig.enabled = false;
+  autoclickerConfig.enabledProjects = new Set();
+  autoclickerConfig.maxParallel = 3;
+  autoclickerConfig.standoffSeconds = 0;
+  autoclickerConfig.running = false;
 
-  let raw;
-  let source = 'primary';
-
-  // Try primary file first
-  try {
-    raw = readFileSync(DATA_FILE, 'utf-8');
-  } catch {
-    // Primary not found — try backup
-    try {
-      raw = readFileSync(BACKUP_FILE, 'utf-8');
-      source = 'backup';
-      console.warn('Primary state file not found, loading from backup');
-    } catch {
-      // Neither exists — fresh start
-      return;
+  // Try to load each split collection. If ANY split file loads, split files
+  // are canonical. Otherwise fall back to the legacy monolithic state.json
+  // and migrate on the next flush.
+  let splitFilesFound = false;
+  const splitData = {};
+  for (const name of COLLECTION_NAMES) {
+    const { primary, backup } = COLLECTIONS[name];
+    const parsed = _readJsonWithBackup(name, primary, backup);
+    if (parsed !== undefined) {
+      splitFilesFound = true;
+      _assignCollection(splitData, name, parsed);
     }
   }
 
-  // Try to parse whichever file we read
-  let data;
-  try {
-    data = JSON.parse(raw);
-  } catch (parseErr) {
-    if (source === 'primary') {
-      console.error(`Corrupt primary state file (${DATA_FILE}): ${parseErr.message}`);
-      // Try backup
-      try {
-        const backupRaw = readFileSync(BACKUP_FILE, 'utf-8');
-        data = JSON.parse(backupRaw);
-        source = 'backup';
-        console.warn('Recovered state from backup file');
-      } catch (backupErr) {
-        console.error(`Backup state file also unusable: ${backupErr.message}`);
-        console.error('Starting with empty state — data may have been lost');
-        return;
+  if (splitFilesFound) {
+    _hydrateFromData(splitData);
+    console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from split files`);
+  } else {
+    const legacy = _loadLegacyMonolith();
+    if (legacy) {
+      _hydrateFromData(legacy);
+      console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from legacy state.json (migrating to split files)`);
+      // Mark every collection dirty so the next debounced flush writes out
+      // the split files. The legacy state.json is intentionally left on disk
+      // as a rollback safety net — a subsequent start will prefer the split
+      // files and ignore the legacy monolith.
+      for (const n of COLLECTION_NAMES) _dirtyCollections.add(n);
+      if (!_debounceTimer) {
+        _debounceTimer = setTimeout(_writeToDisk, DEBOUNCE_MS);
       }
-    } else {
-      console.error(`Corrupt backup state file (${BACKUP_FILE}): ${parseErr.message}`);
-      console.error('Starting with empty state — data may have been lost');
-      return;
     }
+    // else: fresh start — no legacy, no split files.
   }
 
-  _hydrateFromData(data);
-  console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from ${source}`);
   _recoverTransientTasks();
 }
 
@@ -260,7 +352,7 @@ export function addProject({ name, path, url, testCommand }) {
   const id = randomUUID();
   const project = { id, name: name || path.split('/').filter(Boolean).pop(), path, url: url || null, testCommand: testCommand || null, autoTestOnCommit: false, lastTestResult: null, lastRailwayResult: null, budgetLimitUsd: null, branchStrategy: 'direct', sortOrder: projects.size, autoCreatePR: false, prTemplate: null, prReviewers: null, prBaseBranch: null };
   projects.set(id, project);
-  save();
+  save('projects');
   return project;
 }
 
@@ -268,7 +360,7 @@ export function updateProject(id, updates) {
   const project = projects.get(id);
   if (!project) return null;
   Object.assign(project, updates);
-  save();
+  save('projects');
   return project;
 }
 
@@ -281,7 +373,7 @@ export function reorderProjects(orderedIds) {
     const project = projects.get(orderedIds[i]);
     if (project) project.sortOrder = i;
   }
-  save();
+  save('projects');
 }
 
 export function getProject(id) {
@@ -294,7 +386,8 @@ export function removeProject(id) {
   for (const [taskId, task] of tasks) {
     if (task.projectId === id) tasks.delete(taskId);
   }
-  save();
+  // removeProject cascades into tasks (child deletion) and executionQueues.
+  save('projects', 'tasks', 'executionQueues');
 }
 
 export function addTask({ projectId, title, description, rationale, effort, generatedBy }) {
@@ -333,7 +426,7 @@ export function addTask({ projectId, title, description, rationale, effort, gene
     rankingReason: null,
   };
   tasks.set(id, task);
-  save();
+  save('tasks');
   return task;
 }
 
@@ -453,7 +546,7 @@ export function updateTask(id, updates) {
   const task = tasks.get(id);
   if (!task) return null;
   Object.assign(task, updates);
-  save();
+  save('tasks');
   return task;
 }
 
@@ -462,7 +555,7 @@ export function reorderTasks(orderedIds) {
     const task = tasks.get(orderedIds[i]);
     if (task) task.sortOrder = i;
   }
-  save();
+  save('tasks');
 }
 
 export function removeTask(id) {
@@ -477,7 +570,9 @@ export function removeTask(id) {
     }
   }
   const result = tasks.delete(id);
-  save();
+  // removeTask may mutate the task's project queue (via _removeFromQueueInternal)
+  // and dependency refs on sibling tasks.
+  save('tasks', 'executionQueues');
   return result;
 }
 
@@ -487,7 +582,7 @@ export function addPromptTemplate({ name, content }) {
   const id = randomUUID();
   const template = { id, name, content, createdAt: Date.now() };
   promptTemplates.set(id, template);
-  save();
+  save('promptTemplates');
   return template;
 }
 
@@ -504,13 +599,13 @@ export function updatePromptTemplate(id, updates) {
   if (!existing) return null;
   const updated = { ...existing, ...updates, id };
   promptTemplates.set(id, updated);
-  save();
+  save('promptTemplates');
   return updated;
 }
 
 export function removePromptTemplate(id) {
   const result = promptTemplates.delete(id);
-  save();
+  save('promptTemplates');
   return result;
 }
 
@@ -558,7 +653,8 @@ export function clearAllQueues() {
     }
   }
   executionQueues.clear();
-  save();
+  // Mutates task.status/queuePosition as well as executionQueues map.
+  save('tasks', 'executionQueues');
   return result;
 }
 
@@ -634,7 +730,8 @@ export function enqueueTask(projectId, taskId) {
     queue.splice(insertIdx, 0, taskId);
   }
   _reindexQueuePositions(projectId);
-  save();
+  // Queue ops set task.queuePosition on tasks — both collections are dirty.
+  save('tasks', 'executionQueues');
   return tasks.get(taskId)?.queuePosition ?? (queue.indexOf(taskId) + 1);
 }
 
@@ -650,7 +747,7 @@ export function dequeueTask(projectId) {
   } else {
     _reindexQueuePositions(projectId);
   }
-  save();
+  save('tasks', 'executionQueues');
   return taskId;
 }
 
@@ -660,7 +757,7 @@ export function getQueue(projectId) {
 
 export function removeFromQueue(projectId, taskId) {
   const removed = _removeFromQueueInternal(projectId, taskId);
-  if (removed) save();
+  if (removed) save('tasks', 'executionQueues');
   return removed;
 }
 
@@ -728,7 +825,7 @@ export function updateNotificationSettings(projectId, updates) {
   const merged = { ...current, ...updates };
   if (updates.events) merged.events = { ...current.events, ...updates.events };
   notificationSettings.set(projectId || 'global', merged);
-  save();
+  save('notificationSettings');
   return merged;
 }
 
@@ -752,7 +849,7 @@ export function setAutoclickerConfig(updates) {
   if ('maxParallel' in updates) autoclickerConfig.maxParallel = updates.maxParallel;
   if ('standoffSeconds' in updates) autoclickerConfig.standoffSeconds = updates.standoffSeconds;
   if ('running' in updates) autoclickerConfig.running = !!updates.running;
-  save();
+  save('autoclickerConfig');
 }
 
 const AUDIT_LOG_MAX = 500;
@@ -763,6 +860,10 @@ export function addAuditEntry({ projectId, action, targetTaskId, templateId, rea
   if (autoclickerAuditLog.length > AUDIT_LOG_MAX) {
     autoclickerAuditLog.splice(0, autoclickerAuditLog.length - AUDIT_LOG_MAX);
   }
+  // Intentionally no save() — audit entries piggyback on the next state
+  // mutation's flush. This matches the pre-split behavior (a bare audit log
+  // append did not trigger a write) and keeps high-frequency audit entries
+  // from dominating disk traffic.
   return entry;
 }
 
@@ -858,24 +959,31 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   });
 }
 
-// Synchronous last-resort fallback — if somehow still dirty at exit
+// Synchronous last-resort fallback — if somehow still dirty at exit, write
+// each remaining dirty collection synchronously with temp → fsync → rename.
 process.on('exit', () => {
-  if (_dirty) {
-    try {
-      mkdirSync(DATA_DIR, { recursive: true });
-      const data = _serialize();
-      writeFileSync(TEMP_FILE, data);
-      const fd = openSync(TEMP_FILE, 'r');
-      fsyncSync(fd);
-      closeSync(fd);
+  if (_dirtyCollections.size === 0) return;
+  try {
+    mkdirSync(DATA_DIR, { recursive: true });
+    for (const name of _dirtyCollections) {
+      const paths = COLLECTIONS[name];
+      if (!paths) continue;
       try {
-        copyFileSync(DATA_FILE, BACKUP_FILE);
-      } catch {
-        // No primary yet
+        const data = _serializers[name]();
+        writeFileSync(paths.temp, data);
+        const fd = openSync(paths.temp, 'r');
+        try { fsyncSync(fd); } finally { closeSync(fd); }
+        try {
+          copyFileSync(paths.primary, paths.backup);
+        } catch {
+          // No primary yet for this collection.
+        }
+        renameSync(paths.temp, paths.primary);
+      } catch (err) {
+        console.error(`Failed to save '${name}' on exit:`, err.message);
       }
-      renameSync(TEMP_FILE, DATA_FILE);
-    } catch (err) {
-      console.error('Failed to save state on exit:', err.message);
     }
+  } catch (err) {
+    console.error('Failed to save state on exit:', err.message);
   }
 });

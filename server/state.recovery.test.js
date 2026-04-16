@@ -12,7 +12,7 @@ vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    readFileSync: vi.fn(() => { throw new Error('ENOENT'); }),
+    readFileSync: vi.fn(() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }),
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
     renameSync: vi.fn(),
@@ -91,13 +91,25 @@ function makeProject(overrides = {}) {
   };
 }
 
+const ENOENT = () => Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+
+// Route reads by path: legacy `state.json` returns the provided JSON blob;
+// all split-file probes (projects.json, tasks.json, etc.) and
+// `state.backup.json` return ENOENT. This forces load() through its legacy
+// migration path so the existing recovery-test fixtures (monolithic state
+// blobs) still work.
 function loadWithState(stateJson) {
-  readFileSync.mockReturnValueOnce(stateJson);
+  readFileSync.mockImplementation((path) => {
+    if (typeof path === 'string' && path.endsWith('state.json') && !path.endsWith('backup.json')) {
+      return stateJson;
+    }
+    throw ENOENT();
+  });
   state.load();
 }
 
 beforeEach(() => {
-  readFileSync.mockImplementation(() => { throw new Error('ENOENT'); });
+  readFileSync.mockImplementation(() => { throw ENOENT(); });
   state.load(); // reset to empty state
 });
 
@@ -357,15 +369,29 @@ describe('crash recovery — mixed scenario', () => {
 
 // --- Corrupt primary — backup recovery ---
 
-describe('corrupt primary — backup recovery', () => {
+describe('corrupt primary — backup recovery (legacy monolithic)', () => {
+  // Path-aware helper: route reads for legacy state.json / state.backup.json
+  // to provided blobs; all split-file probes throw ENOENT so we exercise the
+  // legacy fallback path.
+  function mockLegacy({ primary, backup }) {
+    readFileSync.mockImplementation((path) => {
+      const p = String(path);
+      if (p.endsWith('state.backup.json')) {
+        if (backup === undefined) throw ENOENT();
+        return backup;
+      }
+      if (p.endsWith('state.json')) {
+        if (primary === undefined) throw ENOENT();
+        return primary;
+      }
+      throw ENOENT();
+    });
+  }
+
   it('recovers from backup when primary contains invalid JSON', () => {
     const proj = makeProject({ id: 'p1' });
     const task = makeTask({ id: 't1', projectId: 'p1', status: 'proposed' });
-    const validBackup = makeState({ projects: [proj], tasks: [task] });
-
-    readFileSync
-      .mockReturnValueOnce('{{not valid json')
-      .mockReturnValueOnce(validBackup);
+    mockLegacy({ primary: '{{not valid json', backup: makeState({ projects: [proj], tasks: [task] }) });
 
     state.load();
 
@@ -377,11 +403,7 @@ describe('corrupt primary — backup recovery', () => {
   it('recovers from backup when primary is truncated', () => {
     const proj = makeProject({ id: 'p1' });
     const task = makeTask({ id: 't1', projectId: 'p1' });
-    const validBackup = makeState({ projects: [proj], tasks: [task] });
-
-    readFileSync
-      .mockReturnValueOnce('{"projects":[{"id":"p1"')  // truncated
-      .mockReturnValueOnce(validBackup);
+    mockLegacy({ primary: '{"projects":[{"id":"p1"', backup: makeState({ projects: [proj], tasks: [task] }) });
 
     state.load();
 
@@ -390,9 +412,7 @@ describe('corrupt primary — backup recovery', () => {
   });
 
   it('starts empty when both primary and backup are corrupt', () => {
-    readFileSync
-      .mockReturnValueOnce('corrupt primary')
-      .mockReturnValueOnce('corrupt backup too');
+    mockLegacy({ primary: 'corrupt primary', backup: 'corrupt backup too' });
 
     state.load();
 
@@ -401,9 +421,7 @@ describe('corrupt primary — backup recovery', () => {
   });
 
   it('starts empty when primary is corrupt and backup does not exist', () => {
-    readFileSync
-      .mockReturnValueOnce('corrupt primary')
-      .mockImplementationOnce(() => { throw new Error('ENOENT'); });
+    mockLegacy({ primary: 'corrupt primary' /* backup missing */ });
 
     state.load();
 
@@ -413,11 +431,7 @@ describe('corrupt primary — backup recovery', () => {
 
   it('loads from backup when primary does not exist but backup does', () => {
     const proj = makeProject({ id: 'p1' });
-    const validBackup = makeState({ projects: [proj] });
-
-    readFileSync
-      .mockImplementationOnce(() => { throw new Error('ENOENT'); })  // primary missing
-      .mockReturnValueOnce(validBackup);  // backup exists
+    mockLegacy({ /* primary missing */ backup: makeState({ projects: [proj] }) });
 
     state.load();
 
@@ -427,9 +441,7 @@ describe('corrupt primary — backup recovery', () => {
   it('logs explicit corruption message for corrupt primary', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    readFileSync
-      .mockReturnValueOnce('not json')
-      .mockImplementationOnce(() => { throw new Error('ENOENT'); });
+    mockLegacy({ primary: 'not json' /* backup missing */ });
 
     state.load();
 
@@ -437,5 +449,41 @@ describe('corrupt primary — backup recovery', () => {
       expect.stringContaining('Corrupt primary state file')
     );
     consoleSpy.mockRestore();
+  });
+});
+
+describe('split-file loading', () => {
+  it('loads from split files when they exist (no legacy fallback)', () => {
+    const proj = makeProject({ id: 'p1' });
+    const task = makeTask({ id: 't1', projectId: 'p1', status: 'proposed' });
+    readFileSync.mockImplementation((path) => {
+      const p = String(path);
+      if (p.endsWith('/projects.json') || p.endsWith('\\projects.json')) return JSON.stringify([proj]);
+      if (p.endsWith('/tasks.json') || p.endsWith('\\tasks.json')) return JSON.stringify([task]);
+      throw ENOENT();
+    });
+
+    state.load();
+
+    expect(state.getProject('p1')).toBeDefined();
+    expect(state.getTask('t1')).toBeDefined();
+    expect(state.getTask('t1').status).toBe('proposed');
+  });
+
+  it('prefers split files over legacy state.json when both exist', () => {
+    const splitProj = makeProject({ id: 'split-proj' });
+    const legacyProj = makeProject({ id: 'legacy-proj' });
+    readFileSync.mockImplementation((path) => {
+      const p = String(path);
+      if (p.endsWith('/projects.json') || p.endsWith('\\projects.json')) return JSON.stringify([splitProj]);
+      if (p.endsWith('state.json') && !p.endsWith('backup.json')) return makeState({ projects: [legacyProj] });
+      throw ENOENT();
+    });
+
+    state.load();
+
+    // Split file wins; legacy state.json ignored.
+    expect(state.getProject('split-proj')).toBeDefined();
+    expect(state.getProject('legacy-proj')).toBeUndefined();
   });
 });
