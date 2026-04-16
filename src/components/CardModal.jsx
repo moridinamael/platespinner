@@ -31,7 +31,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const isActive = isExecuting || isPlanning;
 
   // Default model: same as generating model, or first available
-  const defaultModelId = task.generatedBy || (models?.[0]?.id) || 'claude-opus-4-6';
+  const defaultModelId = task.generatedBy || (models?.[0]?.id) || 'claude-opus-4-7';
   const [selectedModelId, setSelectedModelId] = useState(defaultModelId);
   const [confirmingDismiss, armDismiss, resetDismiss] = useConfirm();
   const [mergeStrategy, setMergeStrategy] = useState('merge');

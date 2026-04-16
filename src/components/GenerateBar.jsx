@@ -25,7 +25,7 @@ function GenerateBar({
   const [now, setNow] = useState(Date.now());
   const [showForm, setShowForm] = useState(false);
   const [formName, setFormName] = useState('');
-  const [selectedModelId, setSelectedModelId] = useState('claude-opus-4-6');
+  const [selectedModelId, setSelectedModelId] = useState('claude-opus-4-7');
 
   const defaultContent = `# Custom Prompt
 
