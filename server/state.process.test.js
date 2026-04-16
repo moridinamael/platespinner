@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock fs modules before importing state (prevents load() from touching disk)
 vi.mock('fs', async (importOriginal) => {
@@ -123,5 +123,139 @@ describe('Dismiss task with active process', () => {
     const handle = state.getProcess(task.id);
     expect(handle).toBeUndefined();
     state.removeTask(task.id);
+  });
+});
+
+// NOTE: this suite verifies the state-level invariant that `isTaskBlocked`
+// is derived live from the blocker's current status (no cached flag), so a
+// dependent becomes actionable the moment its blocker transitions to 'done'.
+// Queue auto-start on completion is a runner concern and is exercised in
+// runner tests, not here.
+describe('Dependency auto-clear on done', () => {
+  let project;
+  const createdTaskIds = [];
+
+  beforeEach(() => {
+    state.load();
+    project = state.addProject({ name: 'dep-test', path: '/tmp/dep-test' });
+    createdTaskIds.length = 0;
+  });
+
+  afterEach(() => {
+    for (const id of createdTaskIds) state.removeTask(id);
+    state.removeProject(project.id);
+  });
+
+  function makeTask(title, opts = {}) {
+    const t = state.addTask({ projectId: project.id, title });
+    createdTaskIds.push(t.id);
+    if (opts.dependencies) state.updateTask(t.id, { dependencies: opts.dependencies });
+    if (opts.status) state.updateTask(t.id, { status: opts.status });
+    return state.getTask(t.id);
+  }
+
+  it('B with deps=[A] is initially blocked while A is proposed', () => {
+    const A = makeTask('A');
+    const B = makeTask('B', { dependencies: [A.id] });
+
+    expect(state.isTaskBlocked(B.id)).toBe(true);
+    const unblocked = state.getUnblockedTasks(project.id);
+    expect(unblocked.map(t => t.id)).not.toContain(B.id);
+    // A has no deps so A itself is unblocked
+    expect(unblocked.map(t => t.id)).toContain(A.id);
+  });
+
+  it('B with deps=[A] remains blocked while A is executing', () => {
+    const A = makeTask('A');
+    const B = makeTask('B', { dependencies: [A.id] });
+
+    state.updateTask(A.id, { status: 'executing' });
+
+    expect(state.isTaskBlocked(B.id)).toBe(true);
+
+    // getBlockers returns live references — A's status reads as 'executing' now.
+    const blockers = state.getBlockers(B.id);
+    expect(blockers).toHaveLength(1);
+    expect(blockers[0].id).toBe(A.id);
+    expect(blockers[0].status).toBe('executing');
+  });
+
+  it('B becomes unblocked the moment A transitions to done', () => {
+    const A = makeTask('A', { status: 'executing' });
+    const B = makeTask('B', { dependencies: [A.id] });
+
+    expect(state.isTaskBlocked(B.id)).toBe(true);
+
+    state.updateTask(A.id, { status: 'done' });
+
+    expect(state.isTaskBlocked(B.id)).toBe(false);
+    const unblocked = state.getUnblockedTasks(project.id);
+    expect(unblocked.map(t => t.id)).toContain(B.id);
+
+    // getBlockers still reports A as a blocker record, but its status is now 'done'.
+    const blockers = state.getBlockers(B.id);
+    expect(blockers).toHaveLength(1);
+    expect(blockers[0].status).toBe('done');
+
+    // Unblocking must not mutate B's own status — only its eligibility.
+    expect(state.getTask(B.id).status).toBe('proposed');
+  });
+
+  it('multiple dependents are all unblocked when a shared blocker completes', () => {
+    const A = makeTask('A', { status: 'executing' });
+    const B = makeTask('B', { dependencies: [A.id] });
+    const C = makeTask('C', { dependencies: [A.id] });
+
+    expect(state.isTaskBlocked(B.id)).toBe(true);
+    expect(state.isTaskBlocked(C.id)).toBe(true);
+
+    state.updateTask(A.id, { status: 'done' });
+
+    expect(state.isTaskBlocked(B.id)).toBe(false);
+    expect(state.isTaskBlocked(C.id)).toBe(false);
+
+    const dependents = state.getDependents(A.id).map(t => t.id).sort();
+    expect(dependents).toEqual([B.id, C.id].sort());
+  });
+
+  it('B with deps=[A, X] stays blocked until BOTH A and X are done', () => {
+    const A = makeTask('A');
+    const X = makeTask('X');
+    const B = makeTask('B', { dependencies: [A.id, X.id] });
+
+    expect(state.isTaskBlocked(B.id)).toBe(true);
+
+    state.updateTask(A.id, { status: 'done' });
+    expect(state.isTaskBlocked(B.id)).toBe(true);
+
+    state.updateTask(X.id, { status: 'done' });
+    expect(state.isTaskBlocked(B.id)).toBe(false);
+  });
+
+  it('removing A strips A from B.dependencies so B is unblocked', () => {
+    const A = makeTask('A');
+    const B = makeTask('B', { dependencies: [A.id] });
+
+    expect(state.isTaskBlocked(B.id)).toBe(true);
+
+    // Remove A directly; removeTask cleans up reverse references.
+    state.removeTask(A.id);
+    // A is no longer tracked in createdTaskIds cleanup — drop it so afterEach doesn't re-remove.
+    const idx = createdTaskIds.indexOf(A.id);
+    if (idx !== -1) createdTaskIds.splice(idx, 1);
+
+    const refreshedB = state.getTask(B.id);
+    expect(refreshedB.dependencies).toEqual([]);
+    expect(state.isTaskBlocked(B.id)).toBe(false);
+  });
+
+  it("blocker with status 'failed' keeps dependent blocked (fail-closed semantics)", () => {
+    // This assertion is documentation-by-test: changing the unblock policy to
+    // include 'failed' should require deliberately updating this test.
+    const A = makeTask('A');
+    const B = makeTask('B', { dependencies: [A.id] });
+
+    state.updateTask(A.id, { status: 'failed' });
+    expect(state.isTaskBlocked(B.id)).toBe(true);
   });
 });
