@@ -313,13 +313,13 @@ export function useTasks({ selectedProjectId, showToast }) {
     }
   }, [filteredTasks, showToast]);
 
-  const handleRankProposals = useCallback(async () => {
-    const proposedTasks = filteredTasks.filter(t => t.status === 'proposed');
-    if (proposedTasks.length < 2) return;
-    const projectIds = [...new Set(proposedTasks.map(t => t.projectId))].filter(pid => !rankingMap[pid]);
-    if (projectIds.length === 0) return;
+  const handleRankProposals = useCallback(async (projectId) => {
+    if (!projectId) return;
+    if (rankingMap[projectId]) return;
+    const count = filteredTasks.filter(t => t.status === 'proposed' && t.projectId === projectId).length;
+    if (count < 2) return;
     try {
-      await Promise.all(projectIds.map(pid => api.rankProposals(pid)));
+      await api.rankProposals(projectId);
     } catch (err) {
       showToast(`Ranking failed: ${err.message}`, 'error');
     }

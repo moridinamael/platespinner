@@ -4,7 +4,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import Card from './Card.jsx';
 
 function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, onMergePR, models, selectedIds, onToggleSelect, filterActive, columnKey, onPlanAll, onExecuteAll, focusedTaskId, onRetry, blockedTaskIds, onRankProposals, rankingMap }) {
-  const rankingInProgress = tasks.some(t => rankingMap[t.projectId]);
+  const isProposedColumn = columnKey === 'proposed';
   const executingTasks = tasks.filter(t => t.status !== 'queued');
   const queuedTasks = tasks.filter(t => t.status === 'queued')
     .sort((a, b) => (a.queuePosition ?? Infinity) - (b.queuePosition ?? Infinity) || (a.createdAt || 0) - (b.createdAt || 0));
@@ -12,6 +12,21 @@ function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onEx
 
   const { setNodeRef: setDroppableRef } = useDroppable({ id: columnKey });
   const sortableIds = useMemo(() => tasks.map(t => t.id), [tasks]);
+
+  const proposedGroups = useMemo(() => {
+    if (!isProposedColumn) return [];
+    const byProject = new Map();
+    for (const t of executingTasks) {
+      if (t.status !== 'proposed') continue;
+      if (!byProject.has(t.projectId)) byProject.set(t.projectId, []);
+      byProject.get(t.projectId).push(t);
+    }
+    return [...byProject.entries()].map(([projectId, projTasks]) => ({
+      projectId,
+      project: projectMap[projectId],
+      tasks: projTasks,
+    }));
+  }, [isProposedColumn, executingTasks, projectMap]);
 
   return (
     <div className="column">
@@ -21,20 +36,6 @@ function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onEx
         {columnKey === 'proposed' && tasks.some(t => t.status === 'proposed') && (
           <button className="btn btn-plan btn-column-action" onClick={onPlanAll} title="Plan all proposed tasks">
             Plan All
-          </button>
-        )}
-        {columnKey === 'proposed' && tasks.filter(t => t.status === 'proposed').length >= 2 && (
-          <button
-            className="btn btn-column-action"
-            onClick={onRankProposals}
-            disabled={rankingInProgress}
-            title="Rank proposed tasks by priority"
-          >
-            {rankingInProgress ? (
-              <><span className="spinner spinner-sm" /> Ranking...</>
-            ) : (
-              'Rank'
-            )}
           </button>
         )}
         {columnKey === 'plan' && tasks.some(t => t.status === 'planned') && (
@@ -50,30 +51,84 @@ function Column({ title, tasks, projectMap, execStartTimes, planStartTimes, onEx
       </div>
       <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
         <div className="column-body" ref={setDroppableRef}>
-          {executingTasks.map((task) => (
-            <Card
-              key={task.id}
-              task={task}
-              project={projectMap[task.projectId]}
-              execStartTime={execStartTimes[task.id]}
-              planStartTime={planStartTimes?.[task.id]}
-              onExecute={onExecute}
-              onPlan={onPlan}
-              onDismiss={onDismiss}
-              onAbort={onAbort}
-              onDequeue={onDequeue}
-              onSelect={onSelectTask}
-              onMerge={onMerge}
-              onCreatePR={onCreatePR}
-              onMergePR={onMergePR}
-              models={models}
-              isSelected={selectedIds?.has(task.id)}
-              onToggleSelect={onToggleSelect}
-              isFocused={task.id === focusedTaskId}
-              onRetry={onRetry}
-              isBlocked={blockedTaskIds?.has(task.id)}
-            />
-          ))}
+          {isProposedColumn ? (
+            proposedGroups.map(({ projectId, project, tasks: projTasks }) => {
+              const projectName = project?.name || 'Unknown project';
+              const canRank = projTasks.length >= 2;
+              const isRanking = !!rankingMap[projectId];
+              return (
+                <div key={projectId} className="project-group">
+                  <div className="project-subheader">
+                    <span className="project-subheader-label">{projectName}</span>
+                    <span className="project-subheader-count">{projTasks.length}</span>
+                    {canRank && (
+                      <button
+                        className="btn btn-column-action project-subheader-rank"
+                        onClick={() => onRankProposals(projectId)}
+                        disabled={isRanking}
+                        title="Rank proposed tasks by priority for this project"
+                      >
+                        {isRanking ? (
+                          <><span className="spinner spinner-sm" /> Ranking...</>
+                        ) : (
+                          'Rank'
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  {projTasks.map((task) => (
+                    <Card
+                      key={task.id}
+                      task={task}
+                      project={project}
+                      execStartTime={execStartTimes[task.id]}
+                      planStartTime={planStartTimes?.[task.id]}
+                      onExecute={onExecute}
+                      onPlan={onPlan}
+                      onDismiss={onDismiss}
+                      onAbort={onAbort}
+                      onDequeue={onDequeue}
+                      onSelect={onSelectTask}
+                      onMerge={onMerge}
+                      onCreatePR={onCreatePR}
+                      onMergePR={onMergePR}
+                      models={models}
+                      isSelected={selectedIds?.has(task.id)}
+                      onToggleSelect={onToggleSelect}
+                      isFocused={task.id === focusedTaskId}
+                      onRetry={onRetry}
+                      isBlocked={blockedTaskIds?.has(task.id)}
+                    />
+                  ))}
+                </div>
+              );
+            })
+          ) : (
+            executingTasks.map((task) => (
+              <Card
+                key={task.id}
+                task={task}
+                project={projectMap[task.projectId]}
+                execStartTime={execStartTimes[task.id]}
+                planStartTime={planStartTimes?.[task.id]}
+                onExecute={onExecute}
+                onPlan={onPlan}
+                onDismiss={onDismiss}
+                onAbort={onAbort}
+                onDequeue={onDequeue}
+                onSelect={onSelectTask}
+                onMerge={onMerge}
+                onCreatePR={onCreatePR}
+                onMergePR={onMergePR}
+                models={models}
+                isSelected={selectedIds?.has(task.id)}
+                onToggleSelect={onToggleSelect}
+                isFocused={task.id === focusedTaskId}
+                onRetry={onRetry}
+                isBlocked={blockedTaskIds?.has(task.id)}
+              />
+            ))
+          )}
           {hasQueuedSection && (
             <div className="queue-divider">
               <span className="queue-divider-label">Queued ({queuedTasks.length})</span>
