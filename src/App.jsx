@@ -60,7 +60,7 @@ export default function App() {
     generatingMap, setupMap, setupResultMap, rankingMap,
     selectedIds, setSelectedIds, bulkInFlight, replayResults,
     logStreamVersion, filters, setFilters,
-    projectTasks, filteredTasks, blockedTaskIds,
+    projectTasks, filteredTasks, blockedTaskIds, blockersByTaskId,
     filterActive, hasActiveAgents, streamingLog,
     logBufferRef,
     handlePlan, handleExecute, handleDismiss, handleAbort,
@@ -110,7 +110,7 @@ export default function App() {
   const [editingSkill, setEditingSkill] = useState(null);
 
   // Keyboard shortcuts
-  const { focusedTaskId } = useKeyboardShortcuts({
+  const { focusedTaskId, setFocusedTaskId } = useKeyboardShortcuts({
     selectedIds, setSelectedIds,
     selectedTask, setSelectedTask,
     activeTab,
@@ -422,6 +422,8 @@ export default function App() {
               onMoveTask={handleMoveTask}
               onRetry={handleRetry}
               blockedTaskIds={blockedTaskIds}
+              blockersByTaskId={blockersByTaskId}
+              onFocusTask={setFocusedTaskId}
               onRankProposals={handleRankProposals}
               rankingMap={rankingMap}
             />

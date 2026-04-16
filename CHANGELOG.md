@@ -1,5 +1,43 @@
 # Changelog
 
+### 2026-04-16 — Show 'Waiting on X' inline hint on dependent cards
+
+When a card is blocked by unfinished dependencies, render a small "Waiting on: <title>" row below the card header in `src/components/Card.jsx`. The blocker title truncates at 40 chars (full title via `title` tooltip) and is a `<button>` that routes through a new `setFocusedTaskId` exposed by `useKeyboardShortcuts`, reusing the existing focus/scroll effect so the blocker receives the `card-focused` outline. `useTasks` now computes `blockersByTaskId` alongside `blockedTaskIds` in a single pass using an id→task Map for O(1) lookup; both values are threaded through `App.jsx` → `KanbanBoard.jsx` → `Column.jsx` to every `<Card>` render site. When multiple blockers exist, the first title renders plus a `+N` badge whose `title` attribute lists the rest. Clicks are `stopPropagation`'d to avoid opening the card modal. Styles added in `src/App.css` near the existing `.blocked-badge` block, reusing `--accent` / `--text-muted` theme variables.
+
+### 2026-04-16 — Auto-clear dependency once the target task reaches 'done'
+
+Confirm and/or adjust the server-side unblock behavior so that when a task transitions to `done`, any dependent task that is still `proposed` or `planned` is eligible to start (either auto-started based on existing queue rules, or simply un-blocked so the Plan/Execute buttons re-enable). Review the existing dependency-blocking logic in server/state.js and the places that compute `blockedTaskIds` in the client; ensure the semantics match the user's mental model: 'I dropped card B onto card A — card B should become actionable the moment A finishes.' Add a server test in server/state.process.test.js covering the scenario: A executing → B proposed with deps=[A] → A transitions to done → B is no longer in blockedTaskIds.
+
+Commit: `9c1c926`
+
+### 2026-04-16 — Regression test: dependency auto-clear when blocker reaches 'done'
+
+Add a `describe('Dependency auto-clear on done', ...)` block in `server/state.process.test.js` that locks in the semantics of `isTaskBlocked`: a dependent becomes actionable the moment its blocker transitions to 'done', purely derived from live status (no cached `blocked` field). Covers: (1) B initially blocked while A is proposed, (2) B still blocked while A is executing, (3) B unblocks the instant A → done (the core scenario from the dependency-drop feature), (4) multiple dependents unblock from a shared blocker, (5) multi-dep blocker stays blocked until all deps are done, (6) removeTask strips reverse references, (7) 'failed' status keeps dependent blocked (documentation-by-test for fail-closed policy). No production code change required — `state.isTaskBlocked` already derives live; the test guards against future regressions (e.g. denormalization, caching).
+
+### 2026-04-16 — Guard against invalid dependency drops (cycles, self, cross-project)
+
+Before calling onAddDependency, validate: (a) source.id !== target.id, (b) source.projectId === target.projectId (DependencyEditor.jsx:6 already filters by project — same scoping must apply), (c) adding target as a dep does not introduce a cycle (walk target's transitive dependencies and reject if source appears). Surface rejection via the existing Toast system (src/components/Toast.jsx) with a helpful message such as 'Cannot depend on a task in another project' or 'Would create a dependency cycle'. Mirror the same validation on the server (server/validation.js and/or the task update route) so the guarantee holds if the UI is bypassed.
+
+Commit: `9682813`
+
+### 2026-04-16 — Visual affordance while dragging a card over another card
+
+In src/components/Card.jsx, when another card is being dragged and the pointer enters this card's droppable area (use the isOver state from useDroppable), render a distinct overlay/outline style (e.g. a dashed accent border plus a small 'Depend on this' chip) so the user knows the drop will create a dependency rather than a reorder. Add matching CSS under a new `.card-drop-depend` class. Also differentiate it visually from the existing card-dragging/card-drag-overlay styles already defined.
+
+Commit: `af162ef`
+
+### 2026-04-16 — Add Claude Opus 4.7 as default model, keep 4.6 selectable
+
+Update `server/models.js` to add a new entry `{ id: 'claude-opus-4-7', label: 'Claude Opus 4.7', provider: 'claude', pricing: { inputPer1M: 15.00, outputPer1M: 75.00 } }` at the top of the `MODELS` array, retain the existing `claude-opus-4-6` entry, and change `DEFAULT_MODEL_ID` from `'claude-opus-4-6'` to `'claude-opus-4-7'`. Also update the two hard-coded fallbacks: `src/components/CardModal.jsx:34` (`|| 'claude-opus-4-6'` → `|| 'claude-opus-4-7'`) and `src/components/GenerateBar.jsx:28` (`useState('claude-opus-4-6')` → `useState('claude-opus-4-7')`). Verify Opus 4.7 pricing with the provider before shipping; the values above mirror Opus 4.6 as a placeholder and should be confirmed.
+
+Commit: `f08f825`
+
+### 2026-04-16 — Replace full-state JSON serialization with incremental writes
+
+state.js serializes the ENTIRE state (25K+ lines of JSON) on every debounced save via _serialize(). Every task update, every status change, every log append triggers a full serialization of all projects, all tasks, all templates, all notification settings into one monolithic JSON string, writes to temp file, fsyncs, and renames. For a board with hundreds of tasks, this is catastrophically wasteful. Switch to: (1) separate files per collection (projects.json, tasks.json, templates.json), (2) only rewrite the collection that changed, or (3) use SQLite (single file, ACID, partial writes). The simplest first step: track which collections are dirty and only serialize those.
+
+Commit: `765cfe3`
+
 ### 2026-04-16 — Replace full-state JSON serialization with incremental per-collection writes
 
 Refactor server/state.js persistence to split the monolithic data/state.json into per-collection files (projects.json, tasks.json, promptTemplates.json, notificationSettings.json, executionQueues.json, autoclickerConfig.json, autoclickerAuditLog.json). Track a dirty-collections Set and only serialize/write the collections that actually changed on each debounced flush; tag every save() call site with the specific collections it mutates (e.g. addTask dirties only 'tasks', enqueueTask dirties 'tasks' + 'executionQueues'). Preserve atomic write semantics (temp → fsync → backup → rename) per-collection, graceful-shutdown flushing, and backward compatibility via automatic one-time migration from the legacy state.json on first load. The legacy file is left on disk as a rollback safety net. Previously every task status change serialized 25K+ lines of JSON; now a task update rewrites only tasks.json.

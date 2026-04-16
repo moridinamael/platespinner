@@ -52,18 +52,21 @@ export function useTasks({ selectedProjectId, showToast }) {
     [projectTasks, filters]
   );
 
-  const blockedTaskIds = useMemo(() => {
+  const { blockedTaskIds, blockersByTaskId } = useMemo(() => {
     const blocked = new Set();
+    const blockers = new Map();
+    const byId = new Map(tasks.map(t => [t.id, t]));
     for (const task of tasks) {
-      if (task.dependencies && task.dependencies.length > 0) {
-        const allDepsDone = task.dependencies.every(depId => {
-          const dep = tasks.find(t => t.id === depId);
-          return dep && dep.status === 'done';
-        });
-        if (!allDepsDone) blocked.add(task.id);
+      if (!task.dependencies || task.dependencies.length === 0) continue;
+      const unfinished = task.dependencies
+        .map(id => byId.get(id))
+        .filter(dep => dep && dep.status !== 'done');
+      if (unfinished.length > 0) {
+        blocked.add(task.id);
+        blockers.set(task.id, unfinished);
       }
     }
-    return blocked;
+    return { blockedTaskIds: blocked, blockersByTaskId: blockers };
   }, [tasks]);
 
   const filterActive = !!(filters.search || filters.efforts.length || filters.statuses.length || filters.modelId || filters.hasPlan || filters.dateFrom || filters.dateTo);
@@ -729,7 +732,7 @@ export function useTasks({ selectedProjectId, showToast }) {
     logStreamVersion, filters, setFilters,
 
     // Derived
-    projectTasks, filteredTasks, blockedTaskIds,
+    projectTasks, filteredTasks, blockedTaskIds, blockersByTaskId,
     filterActive, hasActiveAgents, streamingLog,
 
     // Refs

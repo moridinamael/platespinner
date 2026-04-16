@@ -21,6 +21,11 @@ export function useKeyboardShortcuts({
   const focusedTaskId = focusedCardIndex >= 0 && focusedCardIndex < filteredTasks.length
     ? filteredTasks[focusedCardIndex].id : null;
 
+  const setFocusedTaskId = useCallback((taskId) => {
+    const idx = filteredTasks.findIndex(t => t.id === taskId);
+    if (idx >= 0) setFocusedCardIndex(idx);
+  }, [filteredTasks]);
+
   // Reset focused index when filteredTasks change
   useEffect(() => {
     setFocusedCardIndex(prev => {
@@ -206,5 +211,5 @@ export function useKeyboardShortcuts({
     return () => window.removeEventListener('keydown', handler);
   }, [selectedIds.size, selectedTask, activeTab, filteredTasks, commandPaletteOpen, activityFeedOpen, focusedCardIndex, handlePlan, handleExecute, handleDismiss, COLUMNS, setCommandPaletteOpen, setSelectedTask, setSelectedIds, toggleActivityFeed, setActivityFeedOpen]);
 
-  return { focusedCardIndex, focusedTaskId, COLUMNS };
+  return { focusedCardIndex, focusedTaskId, setFocusedTaskId, COLUMNS };
 }

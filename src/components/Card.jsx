@@ -13,7 +13,7 @@ const ActivitySpinner = ({ variant }) => (
   </svg>
 );
 
-function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, onMergePR, isFocused, onRetry, isBlocked }) {
+function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, onMergePR, isFocused, onRetry, isBlocked, blockers, onFocusBlocker }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
@@ -116,6 +116,33 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
           </button>
         )}
       </div>
+
+      {isBlocked && blockers && blockers.length > 0 && (
+        <div className="waiting-on-hint">
+          <span className="waiting-on-label">Waiting on:</span>
+          <button
+            type="button"
+            className="waiting-on-link"
+            title={blockers[0].title}
+            onClick={(e) => {
+              e.stopPropagation();
+              onFocusBlocker?.(blockers[0].id);
+            }}
+          >
+            {blockers[0].title.length > 40
+              ? blockers[0].title.slice(0, 37) + '...'
+              : blockers[0].title}
+          </button>
+          {blockers.length > 1 && (
+            <span
+              className="waiting-on-more"
+              title={blockers.slice(1).map(b => b.title).join(', ')}
+            >
+              +{blockers.length - 1}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="card-body">
         <p className="card-description">{task.description}</p>
