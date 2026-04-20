@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { readFileSync, writeFileSync, mkdirSync, renameSync, copyFileSync, openSync, fsyncSync, closeSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, copyFileSync, openSync, fsyncSync, closeSync, existsSync } from 'fs';
 import { open, mkdir, rename, copyFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -10,6 +10,11 @@ const DATA_DIR = join(__dirname, '..', 'data');
 // After migration the legacy files stay on disk as a rollback safety net.
 const LEGACY_FILE = join(DATA_DIR, 'state.json');
 const LEGACY_BACKUP = join(DATA_DIR, 'state.backup.json');
+// Sentinel written only after a successful full flush. Its presence means the
+// split files on disk are authoritative; its absence means a migration has
+// not yet completed (or was interrupted) and legacy state.json should be
+// preferred if present. This prevents trusting partially-written split state.
+const MIGRATION_COMPLETE_MARKER = join(DATA_DIR, '.split-migration-complete');
 export const LOGS_DIR = join(DATA_DIR, 'logs');
 
 // Per-collection file layout. Each entry defines primary/backup/temp paths.
@@ -117,6 +122,17 @@ async function _writeToDisk() {
       } catch (err) {
         console.error(`Failed to save collection '${name}':`, err.message);
         failed.push(name);
+      }
+    }
+    // If the flush succeeded with no failures, ensure the migration-complete
+    // marker exists so subsequent loads trust these split files. Idempotent:
+    // a no-op if already present. Sync write — the marker is a single byte
+    // and keeping it synchronous avoids racing with the _writing flag reset.
+    if (failed.length === 0 && !existsSync(MIGRATION_COMPLETE_MARKER)) {
+      try {
+        writeFileSync(MIGRATION_COMPLETE_MARKER, '1');
+      } catch (err) {
+        console.error('Failed to write migration-complete marker:', err.message);
       }
     }
   } finally {
@@ -307,17 +323,25 @@ export function load() {
   autoclickerConfig.standoffSeconds = 0;
   autoclickerConfig.running = false;
 
-  // Try to load each split collection. If ANY split file loads, split files
-  // are canonical. Otherwise fall back to the legacy monolithic state.json
-  // and migrate on the next flush.
+  // Split files are canonical ONLY when the migration-complete marker exists.
+  // Without the marker, any split files on disk may be from an incomplete or
+  // aborted migration and must not shadow the legacy monolith. If legacy is
+  // absent too, fall back to trusting whatever split files exist (treat the
+  // post-migration state where legacy has been deleted as the "rollback was
+  // completed" case).
+  const markerExists = existsSync(MIGRATION_COMPLETE_MARKER);
+  const legacyExists = existsSync(LEGACY_FILE) || existsSync(LEGACY_BACKUP);
+
   let splitFilesFound = false;
   const splitData = {};
-  for (const name of COLLECTION_NAMES) {
-    const { primary, backup } = COLLECTIONS[name];
-    const parsed = _readJsonWithBackup(name, primary, backup);
-    if (parsed !== undefined) {
-      splitFilesFound = true;
-      _assignCollection(splitData, name, parsed);
+  if (markerExists || !legacyExists) {
+    for (const name of COLLECTION_NAMES) {
+      const { primary, backup } = COLLECTIONS[name];
+      const parsed = _readJsonWithBackup(name, primary, backup);
+      if (parsed !== undefined) {
+        splitFilesFound = true;
+        _assignCollection(splitData, name, parsed);
+      }
     }
   }
 
@@ -328,11 +352,14 @@ export function load() {
     const legacy = _loadLegacyMonolith();
     if (legacy) {
       _hydrateFromData(legacy);
-      console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from legacy state.json (migrating to split files)`);
+      const reason = legacyExists && !markerExists
+        ? 'migration not yet complete — preferring legacy'
+        : 'migrating to split files';
+      console.log(`Loaded ${projects.size} projects, ${tasks.size} tasks, ${promptTemplates.size} templates from legacy state.json (${reason})`);
       // Mark every collection dirty so the next debounced flush writes out
       // the split files. The legacy state.json is intentionally left on disk
-      // as a rollback safety net — a subsequent start will prefer the split
-      // files and ignore the legacy monolith.
+      // as a rollback safety net; once the flush completes and the marker is
+      // written, subsequent starts will prefer the split files.
       for (const n of COLLECTION_NAMES) _dirtyCollections.add(n);
       if (!_debounceTimer) {
         _debounceTimer = setTimeout(_writeToDisk, DEBOUNCE_MS);

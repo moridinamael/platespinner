@@ -7,6 +7,12 @@ const mockFileHandle = {
   close: vi.fn(async () => {}),
 };
 
+// Per-test control over which paths "exist" for the migration-complete
+// marker / legacy-file presence checks. Default: marker absent, legacy files
+// absent — individual tests opt in by adding the relevant suffixes. Hoisted
+// so it's available to the vi.mock factory that vitest lifts above imports.
+const { existingPaths } = vi.hoisted(() => ({ existingPaths: new Set() }));
+
 // Mock fs modules before importing state (prevents load() from touching disk)
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal();
@@ -20,6 +26,13 @@ vi.mock('fs', async (importOriginal) => {
     openSync: vi.fn(() => 99),
     fsyncSync: vi.fn(),
     closeSync: vi.fn(),
+    existsSync: vi.fn((path) => {
+      const p = String(path);
+      for (const suffix of existingPaths) {
+        if (p.endsWith(suffix)) return true;
+      }
+      return false;
+    }),
   };
 });
 
@@ -99,6 +112,7 @@ const ENOENT = () => Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
 // migration path so the existing recovery-test fixtures (monolithic state
 // blobs) still work.
 function loadWithState(stateJson) {
+  existingPaths.add('state.json');
   readFileSync.mockImplementation((path) => {
     if (typeof path === 'string' && path.endsWith('state.json') && !path.endsWith('backup.json')) {
       return stateJson;
@@ -109,6 +123,7 @@ function loadWithState(stateJson) {
 }
 
 beforeEach(() => {
+  existingPaths.clear();
   readFileSync.mockImplementation(() => { throw ENOENT(); });
   state.load(); // reset to empty state
 });
@@ -454,6 +469,7 @@ describe('corrupt primary — backup recovery (legacy monolithic)', () => {
 
 describe('split-file loading', () => {
   it('loads from split files when they exist (no legacy fallback)', () => {
+    // No legacy present → split files trusted even without the marker.
     const proj = makeProject({ id: 'p1' });
     const task = makeTask({ id: 't1', projectId: 'p1', status: 'proposed' });
     readFileSync.mockImplementation((path) => {
@@ -470,7 +486,9 @@ describe('split-file loading', () => {
     expect(state.getTask('t1').status).toBe('proposed');
   });
 
-  it('prefers split files over legacy state.json when both exist', () => {
+  it('prefers split files over legacy state.json when both exist AND migration marker is present', () => {
+    existingPaths.add('.split-migration-complete');
+    existingPaths.add('state.json');
     const splitProj = makeProject({ id: 'split-proj' });
     const legacyProj = makeProject({ id: 'legacy-proj' });
     readFileSync.mockImplementation((path) => {
@@ -482,8 +500,29 @@ describe('split-file loading', () => {
 
     state.load();
 
-    // Split file wins; legacy state.json ignored.
+    // Marker present → split file wins; legacy state.json ignored.
     expect(state.getProject('split-proj')).toBeDefined();
     expect(state.getProject('legacy-proj')).toBeUndefined();
+  });
+
+  it('prefers legacy state.json over split files when migration marker is missing', () => {
+    // Split files present but marker absent — an incomplete/aborted migration.
+    // Legacy must win to avoid loading partial split state (regression guard
+    // for the 2026-04-16 data-loss bug where partial split files shadowed the
+    // legacy monolith).
+    existingPaths.add('state.json');
+    const splitProj = makeProject({ id: 'partial-split' });
+    const legacyProj = makeProject({ id: 'legacy-proj' });
+    readFileSync.mockImplementation((path) => {
+      const p = String(path);
+      if (p.endsWith('/projects.json') || p.endsWith('\\projects.json')) return JSON.stringify([splitProj]);
+      if (p.endsWith('state.json') && !p.endsWith('backup.json')) return makeState({ projects: [legacyProj] });
+      throw ENOENT();
+    });
+
+    state.load();
+
+    expect(state.getProject('legacy-proj')).toBeDefined();
+    expect(state.getProject('partial-split')).toBeUndefined();
   });
 });
