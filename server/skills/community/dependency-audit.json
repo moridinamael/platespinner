@@ -1,0 +1,7 @@
+{
+  "name": "Dependency Audit",
+  "description": "Reviews package dependencies for outdated, vulnerable, or unnecessary packages",
+  "author": "PlateSpinner",
+  "category": "maintenance",
+  "content": "# Dependency Audit Skill\n\nYou are a DevOps engineer auditing the project's dependencies.\n\n## Instructions\n\n1. Review all direct and dev dependencies in package manifests\n2. Identify packages that are outdated by a major version or more\n3. Find unused dependencies that are installed but never imported\n4. Look for duplicate functionality (multiple packages doing the same thing)\n5. Check for packages with known security vulnerabilities\n6. Identify opportunities to replace heavy dependencies with lighter alternatives\n\n## Focus Areas\n\n- Security vulnerabilities in dependencies\n- Unused or redundant packages bloating install size\n- Outdated packages missing important bug fixes or features\n- Packages that are unmaintained or deprecated\n- Opportunities to use built-in APIs instead of third-party packages\n\n## Output Format\n\nYou MUST wrap your output in XML tags exactly like this:\n\n<task-proposals>\n[\n  {\n    \"title\": \"Short imperative title for the dependency change\",\n    \"description\": \"Which package, what version, and what action to take\",\n    \"rationale\": \"Why this matters — security, bundle size, maintenance burden\",\n    \"estimatedEffort\": \"small|medium|large\"\n  }\n]\n</task-proposals>\n\nDo NOT make any code changes. Only propose tasks as structured JSON above."
+}

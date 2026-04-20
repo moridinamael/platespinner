@@ -4,7 +4,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { useTaskProgress } from '../hooks/useTaskProgress.js';
 import { useSharedClock } from '../hooks/useSharedClock.js';
-import { formatBytes, getModelLabelForTask, getModelProviderForTask } from '../utils.js';
+import { formatBytes, resolveTaskModel } from '../utils.js';
 
 const ActivitySpinner = ({ variant }) => (
   <svg className={`activity-spinner activity-spinner-${variant}`} width="16" height="16" viewBox="0 0 16 16">
@@ -13,15 +13,16 @@ const ActivitySpinner = ({ variant }) => (
   </svg>
 );
 
-function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, isFocused }) {
+function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelect, queuePosition, models, isSelected, onToggleSelect, onMerge, onCreatePR, onMergePR, isFocused, onRetry, isBlocked, blockers, onFocusBlocker }) {
   const isProposed = task.status === 'proposed';
   const isPlanning = task.status === 'planning';
   const isPlanned = task.status === 'planned';
   const isQueued = task.status === 'queued';
   const isExecuting = task.status === 'executing';
   const isDone = task.status === 'done';
+  const isFailed = task.status === 'failed';
 
-  const isDraggable = isProposed || isPlanned;
+  const isDraggable = isProposed || isPlanned || isFailed;
   const {
     attributes,
     listeners,
@@ -29,7 +30,11 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
     transform,
     transition: sortTransition,
     isDragging,
+    isOver,
+    active,
   } = useSortable({ id: task.id, disabled: !isDraggable });
+
+  const isDropDependTarget = isOver && !isDragging && active && active.id !== task.id;
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -49,14 +54,13 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
 
   const [confirmingDismiss, armDismiss, resetDismiss] = useConfirm();
 
-  const modelLabel = getModelLabelForTask(task, models);
-  const modelProvider = getModelProviderForTask(task, models);
+  const { label: modelLabel, provider: modelProvider } = resolveTaskModel(task, models);
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`card card-${task.status}${isSelected ? ' card-selected' : ''}${isFocused ? ' card-focused' : ''}${isDragging ? ' card-dragging' : ''}`}
+      className={`card card-${task.status}${isSelected ? ' card-selected' : ''}${isFocused ? ' card-focused' : ''}${isDragging ? ' card-dragging' : ''}${isBlocked ? ' card-blocked' : ''}${isDropDependTarget ? ' card-drop-depend' : ''}`}
       {...attributes}
       {...listeners}
       onClick={(e) => {
@@ -69,6 +73,15 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
         }
       }}
     >
+      {isDropDependTarget && (
+        <span className="card-drop-depend-chip" aria-hidden="true">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+          </svg>
+          Depend on this
+        </span>
+      )}
       {/* Selection indicator */}
       <div className="card-select-indicator">
         {isSelected && (
@@ -82,7 +95,10 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
         {isQueued && queuePosition && (
           <span className="queue-position-badge">#{queuePosition} in queue</span>
         )}
-        {(isProposed || isPlanned || isPlanning || isQueued) && (
+        {isBlocked && (
+          <span className="blocked-badge">Blocked</span>
+        )}
+        {(isProposed || isPlanned || isPlanning || isQueued || isFailed) && (
           <button
             className={`card-dismiss${confirmingDismiss ? ' confirming' : ''}`}
             onClick={(e) => {
@@ -100,6 +116,33 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
           </button>
         )}
       </div>
+
+      {isBlocked && blockers && blockers.length > 0 && (
+        <div className="waiting-on-hint">
+          <span className="waiting-on-label">Waiting on:</span>
+          <button
+            type="button"
+            className="waiting-on-link"
+            title={blockers[0].title}
+            onClick={(e) => {
+              e.stopPropagation();
+              onFocusBlocker?.(blockers[0].id);
+            }}
+          >
+            {blockers[0].title.length > 40
+              ? blockers[0].title.slice(0, 37) + '...'
+              : blockers[0].title}
+          </button>
+          {blockers.length > 1 && (
+            <span
+              className="waiting-on-more"
+              title={blockers.slice(1).map(b => b.title).join(', ')}
+            >
+              +{blockers.length - 1}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="card-body">
         <p className="card-description">{task.description}</p>
@@ -124,6 +167,28 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
           </span>
         )}
 
+        {task.rankingRank != null && (
+          <span className="ranking-badge-wrapper">
+            <span className="ranking-badge">
+              #{task.rankingRank}
+            </span>
+            {task.rankingReason && (
+              <span className="ranking-tooltip">
+                {task.rankingScore != null && (
+                  <span className="ranking-tooltip-score">Score: {task.rankingScore}/10</span>
+                )}
+                <span className="ranking-tooltip-reason">{task.rankingReason}</span>
+              </span>
+            )}
+          </span>
+        )}
+
+        {task.similarTasks?.length > 0 && (
+          <span className="duplicate-badge" title={`${task.similarTasks.length} potential duplicate(s)`}>
+            ~{task.similarTasks.length}
+          </span>
+        )}
+
         {project && (
           <span className="project-badge">
             {project.name}
@@ -131,7 +196,12 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
         )}
 
         {isProposed && (
-          <button className="btn btn-sm btn-plan" onClick={(e) => { e.stopPropagation(); onPlan(task.id); }}>
+          <button
+            className="btn btn-sm btn-plan"
+            onClick={(e) => { e.stopPropagation(); onPlan(task.id); }}
+            disabled={isBlocked}
+            title={isBlocked ? 'Blocked by dependencies' : undefined}
+          >
             Plan<span className="shortcut-hint">P</span>
           </button>
         )}
@@ -146,7 +216,12 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
         )}
 
         {isPlanned && (
-          <button className="btn btn-sm btn-execute" onClick={(e) => { e.stopPropagation(); onExecute(task.id); }}>
+          <button
+            className="btn btn-sm btn-execute"
+            onClick={(e) => { e.stopPropagation(); onExecute(task.id); }}
+            disabled={isBlocked}
+            title={isBlocked ? 'Blocked by dependencies' : undefined}
+          >
             Execute<span className="shortcut-hint">E</span>
           </button>
         )}
@@ -190,20 +265,61 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
             {task.branch.length > 30 ? task.branch.slice(0, 27) + '...' : task.branch}
           </span>
         )}
+
+        {isFailed && (
+          <span className="executing-status">
+            <span className="failed-badge">Failed{task.failureCount > 1 ? ` (x${task.failureCount})` : ''}</span>
+            <button
+              className="btn btn-sm btn-execute"
+              onClick={(e) => { e.stopPropagation(); onRetry(task.id); }}
+              title="Retry with new planning pass"
+            >
+              Retry
+            </button>
+          </span>
+        )}
       </div>
 
-      {isDone && task.branch && (
+      {isDone && (task.branch || task.prUrl) && (
         <div className="card-done-actions" onClick={(e) => e.stopPropagation()}>
-          <button className="btn btn-sm btn-merge" onClick={(e) => { e.stopPropagation(); onMerge?.(task.id); }}>
-            Merge
-          </button>
-          <button className="btn btn-sm btn-pr" onClick={(e) => { e.stopPropagation(); onCreatePR?.(task.id); }}>
-            Create PR
-          </button>
+          {!task.merged && task.branch && !task.prUrl && (
+            <>
+              <button className="btn btn-sm btn-merge" onClick={(e) => { e.stopPropagation(); onMerge?.(task.id); }}>
+                Merge
+              </button>
+              <button className="btn btn-sm btn-pr" onClick={(e) => { e.stopPropagation(); onCreatePR?.(task.id); }}>
+                Create PR
+              </button>
+            </>
+          )}
           {task.prUrl && (
-            <a href={task.prUrl} target="_blank" rel="noopener noreferrer" className="pr-link" onClick={(e) => e.stopPropagation()}>
-              PR
-            </a>
+            <>
+              <a href={task.prUrl} target="_blank" rel="noopener noreferrer" className="pr-link" onClick={(e) => e.stopPropagation()}>
+                PR #{task.prNumber || ''}
+              </a>
+              {task.prStatus && task.prStatus.ciStatus && task.prStatus.ciStatus !== 'unknown' && (
+                <span className={`pr-status-badge pr-ci-${task.prStatus.ciStatus}`}>
+                  {task.prStatus.ciStatus === 'passed' ? 'CI \u2713' :
+                   task.prStatus.ciStatus === 'failed' ? 'CI \u2717' :
+                   task.prStatus.ciStatus === 'pending' ? 'CI ...' : ''}
+                </span>
+              )}
+              {task.prStatus?.reviewDecision && (
+                <span className={`pr-status-badge pr-review-${task.prStatus.reviewDecision.toLowerCase()}`}>
+                  {task.prStatus.reviewDecision === 'APPROVED' ? 'Approved' :
+                   task.prStatus.reviewDecision === 'CHANGES_REQUESTED' ? 'Changes' :
+                   'Review needed'}
+                </span>
+              )}
+              {!task.merged && (
+                <button className="btn btn-sm btn-merge" onClick={(e) => { e.stopPropagation(); onMergePR?.(task.id); }}>
+                  Merge PR
+                </button>
+              )}
+              {task.merged && (
+                <span className="pr-merged-badge">Merged</span>
+              )}
+            </>
           )}
         </div>
       )}
@@ -225,6 +341,20 @@ function Card({ task, project, execStartTime, planStartTime, onExecute, onPlan, 
       )}
 
       {isDone && task.agentLog && (
+        <details className="card-log" onClick={(e) => e.stopPropagation()}>
+          <summary>Agent log</summary>
+          <pre>{task.agentLog}</pre>
+        </details>
+      )}
+
+      {isFailed && task.lastTestOutput && (
+        <details className="card-log" onClick={(e) => e.stopPropagation()}>
+          <summary>Test failure output</summary>
+          <pre>{task.lastTestOutput.slice(0, 5000)}</pre>
+        </details>
+      )}
+
+      {isFailed && task.agentLog && (
         <details className="card-log" onClick={(e) => e.stopPropagation()}>
           <summary>Agent log</summary>
           <pre>{task.agentLog}</pre>

@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { EFFORT_COLORS, formatCost } from '../utils.js';
 import Sparkline from './Sparkline.jsx';
 
-function SortableProjectItem({ project, isActive, isConfirming, statusColor, testStatusMap, railwayStatusMap, onSelect, onRemove, onConfirmStart, formatTimeAgo }) {
+function SortableProjectItem({ project, isActive, isConfirming, statusColor, testStatusMap, railwayStatusMap, onSelect, onRemove, onConfirmStart, formatTimeAgo, unreadCount, onActivityClick }) {
   const {
     attributes,
     listeners,
@@ -75,6 +75,18 @@ function SortableProjectItem({ project, isActive, isConfirming, statusColor, tes
           </span>
         </span>
         <span className="project-name">{p.name}</span>
+        {unreadCount > 0 && (
+          <span
+            className="activity-badge"
+            onClick={(e) => {
+              e.stopPropagation();
+              onActivityClick(project.id);
+            }}
+            title={`${unreadCount} new completion${unreadCount !== 1 ? 's' : ''}`}
+          >
+            {unreadCount}
+          </span>
+        )}
       </button>
       <button
         className={`project-remove${isConfirming ? ' confirming' : ''}`}
@@ -116,9 +128,14 @@ function Sidebar({
   onTestNotification,
   onRequestNotificationPermission,
   onReorderProjects,
+  onShowToast,
   tasks,
+  unreadCountByProject,
+  onMarkProjectSeen,
   theme,
   onToggleTheme,
+  authRequired,
+  onLogout,
 }) {
   const [path, setPath] = useState('');
   const [pushing, setPushing] = useState(null);
@@ -187,10 +204,10 @@ function Sidebar({
       const opts = { signal: controller.signal };
       api.getGitStatus(selectedProjectId, opts)
         .then(setGitInfo)
-        .catch(() => { if (!controller.signal.aborted) setGitInfo(null); });
+        .catch(err => { if (!controller.signal.aborted) { console.warn('Failed to load git status:', err); setGitInfo(null); } });
       api.getTestInfo(selectedProjectId, opts)
         .then(setTestInfo)
-        .catch(() => { if (!controller.signal.aborted) setTestInfo(null); });
+        .catch(err => { if (!controller.signal.aborted) { console.warn('Failed to load test info:', err); setTestInfo(null); } });
     }, 300);
 
     return () => {
@@ -204,8 +221,8 @@ function Sidebar({
     if (!setupResult || !selectedProjectId) return;
     const controller = new AbortController();
     const opts = { signal: controller.signal };
-    api.getTestInfo(selectedProjectId, opts).then(setTestInfo).catch(() => {});
-    api.getGitStatus(selectedProjectId, opts).then(setGitInfo).catch(() => {});
+    api.getTestInfo(selectedProjectId, opts).then(setTestInfo).catch(err => console.warn('Failed to refresh test info after setup:', err));
+    api.getGitStatus(selectedProjectId, opts).then(setGitInfo).catch(err => console.warn('Failed to refresh git status after setup:', err));
     return () => controller.abort();
   }, [setupResult, selectedProjectId]);
 
@@ -259,7 +276,7 @@ function Sidebar({
     try {
       const result = await api.pushProject(projectId);
       setPushResult({ success: true, output: result.output });
-      api.getGitStatus(projectId).then(setGitInfo).catch(() => {});
+      api.getGitStatus(projectId).then(setGitInfo).catch(err => console.warn('Failed to refresh git status after push:', err));
     } catch (err) {
       setPushResult({ success: false, output: err.message });
     } finally {
@@ -274,8 +291,8 @@ function Sidebar({
     if (trimmed === (selectedProject?.testCommand || '')) return;
     try {
       await api.updateProject(selectedProjectId, { testCommand: trimmed });
-      api.getTestInfo(selectedProjectId).then(setTestInfo).catch(() => {});
-    } catch { /* ignore */ }
+      api.getTestInfo(selectedProjectId).then(setTestInfo).catch(err => console.warn('Failed to refresh test info:', err));
+    } catch (err) { onShowToast?.('Failed to save test command: ' + err.message, 'error'); }
   };
 
   const handleRunTests = async () => {
@@ -284,8 +301,8 @@ function Sidebar({
     try {
       await api.runTests(selectedProjectId);
       // Status updates come via WebSocket (test-started / test-completed)
-    } catch {
-      // Only if the HTTP request itself fails (network error, 404, etc.)
+    } catch (err) {
+      onShowToast?.('Failed to start tests: ' + err.message, 'error');
     }
   };
 
@@ -293,7 +310,7 @@ function Sidebar({
     if (!selectedProjectId) return;
     try {
       await api.setupTests(selectedProjectId);
-    } catch { /* fire-and-forget, errors come via WS */ }
+    } catch (err) { onShowToast?.('Test setup failed: ' + err.message, 'error'); }
   };
 
   const handleRailwaySave = async () => {
@@ -302,14 +319,14 @@ function Sidebar({
     if (trimmed === (selectedProject?.railwayProject || '')) return;
     try {
       await api.updateProject(selectedProjectId, { railwayProject: trimmed });
-    } catch { /* ignore */ }
+    } catch (err) { onShowToast?.('Failed to save Railway config: ' + err.message, 'error'); }
   };
 
   const handleCheckRailway = async () => {
     if (!selectedProjectId) return;
     try {
       await api.checkRailway(selectedProjectId);
-    } catch { /* errors handled via WS broadcast */ }
+    } catch (err) { onShowToast?.('Railway check failed: ' + err.message, 'error'); }
   };
 
   // Cost dashboard data
@@ -335,7 +352,7 @@ function Sidebar({
     if (numVal === current || (numVal === null && current === null)) return;
     try {
       await api.updateProject(selectedProjectId, { budgetLimitUsd: numVal });
-    } catch { /* ignore */ }
+    } catch (err) { onShowToast?.('Failed to save budget: ' + err.message, 'error'); }
   };
 
   const canRunTests = testInfo && testInfo.source !== 'none';
@@ -375,6 +392,11 @@ function Sidebar({
         >
           {theme === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19'}
         </button>
+        {authRequired && (
+          <button className="theme-toggle" onClick={onLogout} title="Log out">
+            \uD83D\uDD12
+          </button>
+        )}
       </div>
 
       <button
@@ -583,7 +605,7 @@ function Sidebar({
                     />
                   </label>
                 )}
-                <button className="btn btn-sm" onClick={() => api.testEmailNotification()}>
+                <button className="btn btn-sm" onClick={() => api.testEmailNotification().catch(err => onShowToast?.(err.message, 'error'))}>
                   Test Email
                 </button>
               </details>
@@ -684,6 +706,11 @@ function Sidebar({
                     confirmTimerRef.current = setTimeout(() => setConfirmingProjectId(null), 3000);
                   }}
                   formatTimeAgo={formatTimeAgo}
+                  unreadCount={(unreadCountByProject && unreadCountByProject[p.id]) || 0}
+                  onActivityClick={(projectId) => {
+                    onSelectProject(projectId);
+                    if (onMarkProjectSeen) onMarkProjectSeen(projectId);
+                  }}
                 />
               ))}
             </SortableContext>
@@ -874,6 +901,67 @@ function Sidebar({
               <option value="per-batch">Per-batch (branch per generation)</option>
             </select>
           </label>
+          <label className="setting-field setting-field-row">
+            <input
+              type="checkbox"
+              className="setting-checkbox"
+              checked={!!selectedProject?.autoCreatePR}
+              onChange={async (e) => {
+                try {
+                  await api.updateProject(selectedProjectId, { autoCreatePR: e.target.checked });
+                } catch { /* ignore */ }
+              }}
+            />
+            <span className="setting-label">Auto-create PR after execution</span>
+          </label>
+          {selectedProject?.autoCreatePR && (
+            <>
+              <label className="setting-field">
+                <span className="setting-label">PR Reviewers</span>
+                <input
+                  type="text"
+                  className="input input-sm"
+                  placeholder="user1,user2"
+                  defaultValue={selectedProject?.prReviewers || ''}
+                  onBlur={async (e) => {
+                    try {
+                      await api.updateProject(selectedProjectId, { prReviewers: e.target.value.trim() || null });
+                    } catch { /* ignore */ }
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                />
+              </label>
+              <label className="setting-field">
+                <span className="setting-label">PR Base Branch</span>
+                <input
+                  type="text"
+                  className="input input-sm"
+                  placeholder="main (default)"
+                  defaultValue={selectedProject?.prBaseBranch || ''}
+                  onBlur={async (e) => {
+                    try {
+                      await api.updateProject(selectedProjectId, { prBaseBranch: e.target.value.trim() || null });
+                    } catch { /* ignore */ }
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                />
+              </label>
+              <label className="setting-field">
+                <span className="setting-label">PR Body Template</span>
+                <textarea
+                  className="input input-sm"
+                  placeholder={'## {{title}}\n\n{{description}}\n\n{{rationale}}'}
+                  rows={4}
+                  defaultValue={selectedProject?.prTemplate || ''}
+                  onBlur={async (e) => {
+                    try {
+                      await api.updateProject(selectedProjectId, { prTemplate: e.target.value.trim() || null });
+                    } catch { /* ignore */ }
+                  }}
+                />
+              </label>
+            </>
+          )}
         </div>
       )}
 

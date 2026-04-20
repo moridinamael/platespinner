@@ -12,7 +12,6 @@ function formatElapsed(ms) {
 function GenerateBar({
   generatingMap,
   onGenerate,
-  statusMessage,
   selectedProjectId,
   projects,
   templates,
@@ -20,12 +19,13 @@ function GenerateBar({
   onSelectTemplate,
   onCreateTemplate,
   onDeleteTemplate,
+  onOpenSkillEditor,
   models,
 }) {
   const [now, setNow] = useState(Date.now());
   const [showForm, setShowForm] = useState(false);
   const [formName, setFormName] = useState('');
-  const [selectedModelId, setSelectedModelId] = useState('claude-opus-4-6');
+  const [selectedModelId, setSelectedModelId] = useState('claude-opus-4-7');
 
   const defaultContent = `# Custom Prompt
 
@@ -133,6 +133,16 @@ Do NOT make any code changes. Only propose tasks as structured JSON above.`;
         </select>
 
         <div className="template-actions">
+          <button
+            className="btn btn-edit-skill"
+            onClick={() => {
+              const selected = templates.find(t => t.id === selectedTemplateId);
+              onOpenSkillEditor(selected || null);
+            }}
+            title="Open Skill Editor"
+          >
+            Edit
+          </button>
           <button
             className="btn btn-add-template"
             onClick={() => setShowForm(!showForm)}
@@ -252,7 +262,6 @@ Do NOT make any code changes. Only propose tasks as structured JSON above.`;
         </div>
       )}
 
-      {statusMessage && <span className="status-message">{statusMessage}</span>}
     </div>
   );
 }

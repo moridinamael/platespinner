@@ -3,9 +3,9 @@ import { createWriteStream, mkdirSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { broadcast } from '../ws.js';
-import { buildGenerationCommand, buildExecutionCommand, buildTestSetupCommand } from './cli.js';
-import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, buildTestSetupPrompt, buildJudgmentPrompt, getBuiltInTemplates } from './prompts.js';
-import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput, parseJudgmentOutput, extractClaudeJsonOutput, estimateTokensFromText } from './parser.js';
+import { buildGenerationCommand, buildExecutionCommand, buildTestSetupCommand, buildRankingCommand } from './cli.js';
+import { buildGenerationPrompt, buildExecutionPrompt, buildPlanningPrompt, buildTestSetupPrompt, buildJudgmentPrompt, buildRankingPrompt, getBuiltInTemplates } from './prompts.js';
+import { parseGenerationOutput, parseExecutionOutput, parsePlanningOutput, parseTestSetupOutput, parseJudgmentOutput, parseRankingOutput, extractClaudeJsonOutput, estimateTokensFromText } from './parser.js';
 import { toWSLPath } from '../paths.js';
 import { DEFAULT_MODEL_ID, getModel, estimateCost } from '../models.js';
 import { runTests, validateTestCommand } from '../testing.js';
@@ -15,6 +15,10 @@ import { registerAgent, unregisterAgent } from '../census.js';
 import { emitNotification, checkAllTasksDone } from '../notifications.js';
 import { writeReplayEvent, compressReplayLog } from './replay.js';
 import { runPostExecutionHooks, runPreExecutionHooks, runPostPlanningHooks, runTaskValidators, emitPluginEvent } from '../plugins/manager.js';
+import { renderPRBody } from '../prUtils.js';
+import { trackPR, fetchPRStatus } from '../prStatus.js';
+import { findSimilarTasks, extractFilePaths, findFileConflicts } from '../similarity.js';
+import { recordActivity } from '../activityLog.js';
 
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
 
@@ -57,67 +61,94 @@ async function branchExists(cwd, branchName) {
 }
 
 function advanceQueue(projectId) {
-  let nextTaskId;
-  while ((nextTaskId = state.dequeueTask(projectId))) {
-    const nextTask = state.getTask(nextTaskId);
-    if (nextTask && nextTask.status === 'queued') {
-      broadcast('execution:queue-advanced', {
-        projectId,
-        startedTaskId: nextTaskId,
-        queue: state.getQueue(projectId),
-      });
-      broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
-      runExecution(nextTask, nextTask.executedBy).catch((advanceErr) => {
-        console.error('Queue auto-advance failed:', advanceErr.message);
-        const staleTask = state.getTask(nextTaskId);
-        if (staleTask && staleTask.status === 'queued') {
-          state.updateTask(nextTaskId, {
-            status: staleTask.plan ? 'planned' : 'proposed',
-            agentLog: `Auto-advance failed: ${advanceErr.message}`,
-          });
-          broadcast('execution:failed', {
-            taskId: nextTaskId,
-            error: `Auto-advance failed: ${advanceErr.message}`,
-            aborted: false,
-            status: staleTask.plan ? 'planned' : 'proposed',
-          });
-        }
-      });
-      return;
-    }
-    // Task was dismissed/deleted or status changed — skip it, try next
+  const queue = state.getQueue(projectId);
+
+  // Find the first unblocked, valid task in the queue
+  for (let i = 0; i < queue.length; i++) {
+    const candidateId = queue[i];
+    const candidate = state.getTask(candidateId);
+    if (!candidate || candidate.status !== 'queued') continue;
+    if (state.isTaskBlocked(candidateId)) continue;
+
+    // Found an unblocked task — remove it from queue and execute
+    state.removeFromQueue(projectId, candidateId);
+    broadcast('execution:queue-advanced', {
+      projectId,
+      startedTaskId: candidateId,
+      queue: state.getQueue(projectId),
+    });
+    broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
+    runExecution(candidate, candidate.executedBy).catch((advanceErr) => {
+      console.error('Queue auto-advance failed:', advanceErr.message);
+      const staleTask = state.getTask(candidateId);
+      if (staleTask && staleTask.status === 'queued') {
+        state.updateTask(candidateId, {
+          status: staleTask.plan ? 'planned' : 'proposed',
+          agentLog: `Auto-advance failed: ${advanceErr.message}`,
+        });
+        broadcast('execution:failed', {
+          taskId: candidateId,
+          error: `Auto-advance failed: ${advanceErr.message}`,
+          aborted: false,
+          status: staleTask.plan ? 'planned' : 'proposed',
+        });
+      }
+    });
+    return;
   }
-  // Queue is empty — broadcast so clients clear stale state
+
+  // Queue is empty or all tasks are blocked — broadcast so clients clear stale state
   broadcast('execution:queue-updated', state.getQueueSnapshot(projectId));
 }
 
-const GIT_POLL_MS = 10_000; // poll git status every 10s
+const GIT_POLL_MS = 30_000; // poll git status every 30s
 
 function pollGitStatus(cwd, taskId) {
-  const interval = setInterval(() => {
-    // Get short diff stat
-    execFile('git', ['diff', '--stat', 'HEAD'], { cwd }, (err, stdout) => {
-      if (err) return;
-      const lines = stdout.trim().split('\n').filter(Boolean);
-      if (lines.length === 0) return;
-      // Last line is summary like " 3 files changed, 45 insertions(+), 12 deletions(-)"
-      const summary = lines[lines.length - 1].trim();
-      // Individual file changes
-      const files = lines.slice(0, -1).map((l) => l.trim()).filter(Boolean);
-      broadcast('execution:git', { taskId, summary, files });
-    });
+  const SEP = '---GIT_POLL_SEP---';
+  let lastOutput = '';
+  let intervalId = null;
 
-    // Also check for new untracked files
-    execFile('git', ['ls-files', '--others', '--exclude-standard'], { cwd }, (err, stdout) => {
-      if (err || !stdout.trim()) return;
-      const untracked = stdout.trim().split('\n').filter(Boolean);
-      if (untracked.length > 0) {
-        broadcast('execution:git-untracked', { taskId, files: untracked });
+  const poll = () => {
+    execFile(
+      'bash',
+      ['-c', `git diff --stat HEAD 2>/dev/null; echo '${SEP}'; git ls-files --others --exclude-standard 2>/dev/null`],
+      { cwd },
+      (err, stdout) => {
+        if (err) return;
+        if (stdout === lastOutput) return;
+        lastOutput = stdout;
+
+        const [diffPart, untrackedPart] = stdout.split(SEP);
+
+        if (diffPart) {
+          const lines = diffPart.trim().split('\n').filter(Boolean);
+          if (lines.length > 0) {
+            const summary = lines[lines.length - 1].trim();
+            const files = lines.slice(0, -1).map((l) => l.trim()).filter(Boolean);
+            broadcast('execution:git', { taskId, summary, files });
+          }
+        }
+
+        if (untrackedPart) {
+          const untracked = untrackedPart.trim().split('\n').filter(Boolean);
+          if (untracked.length > 0) {
+            broadcast('execution:git-untracked', { taskId, files: untracked });
+          }
+        }
       }
-    });
-  }, GIT_POLL_MS);
+    );
+  };
 
-  return () => clearInterval(interval);
+  // Stagger start with random jitter so concurrent tasks don't all poll simultaneously
+  const startTimer = setTimeout(() => {
+    poll();
+    intervalId = setInterval(poll, GIT_POLL_MS);
+  }, Math.floor(Math.random() * GIT_POLL_MS));
+
+  return () => {
+    clearTimeout(startTimer);
+    if (intervalId !== null) clearInterval(intervalId);
+  };
 }
 
 // Get full login-shell PATH (includes ~/.bashrc, Windows PATH in WSL, etc.)
@@ -244,7 +275,7 @@ function extractCostData(stdout, stdinData, modelId) {
   };
 }
 
-function checkBudget(project) {
+export function checkBudget(project) {
   if (project.budgetLimitUsd == null) return { allowed: true };
   const projectTasks = state.getTasks(project.id);
   const totalSpent = projectTasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
@@ -293,19 +324,26 @@ export async function runGeneration(project, templateId, modelId, promptContent)
     });
 
     // Dedup: skip proposals whose title matches an existing task for this project
+    const existingTasks = state.getTasks(project.id);
     const existingTitles = new Set(
-      state.getTasks(project.id).map((t) => t.title.toLowerCase().trim())
+      existingTasks.map((t) => t.title.toLowerCase().trim())
     );
 
     const costPerTask = costData.costUsd ? costData.costUsd / Math.max(proposals.length, 1) : null;
 
     const createdTasks = [];
+    const pendingReview = [];
     let skipped = 0;
     for (const proposal of proposals) {
+      // Phase 1: Exact match — auto-skip
       if (existingTitles.has(proposal.title.toLowerCase().trim())) {
         skipped++;
         continue;
       }
+
+      // Phase 2: Semantic similarity check
+      const similar = findSimilarTasks(proposal, existingTasks);
+
       const task = state.addTask({
         projectId: project.id,
         title: proposal.title,
@@ -314,23 +352,61 @@ export async function runGeneration(project, templateId, modelId, promptContent)
         effort: proposal.estimatedEffort || 'medium',
         generatedBy: modelId,
       });
+
+      if (similar.length > 0) {
+        state.updateTask(task.id, {
+          similarTasks: similar.map(s => ({ taskId: s.taskId, title: s.title, score: s.score, status: s.status })),
+        });
+        pendingReview.push({ taskId: task.id, title: task.title, similar });
+      }
+
+      // Store ranking data if present in the proposal
+      if (proposal.rank != null || proposal.rankingScore != null || proposal.rankingReason) {
+        state.updateTask(task.id, {
+          rankingRank: proposal.rank != null ? Number(proposal.rank) || null : null,
+          rankingScore: proposal.rankingScore != null ? Number(proposal.rankingScore) || null : null,
+          rankingReason: proposal.rankingReason || null,
+        });
+      }
+
       if (costPerTask != null) {
         state.updateTask(task.id, {
           tokenUsage: { generation: { input: costData.inputTokens, output: costData.outputTokens } },
           costUsd: costPerTask,
         });
       }
-      createdTasks.push(task);
-      broadcast('task:created', task);
+      createdTasks.push(state.getTask(task.id));
+      broadcast('task:created', state.getTask(task.id));
+    }
+
+    // Broadcast duplicate review needed
+    if (pendingReview.length > 0) {
+      broadcast('generation:duplicates-found', {
+        projectId: project.id,
+        duplicates: pendingReview,
+      });
     }
 
     broadcast('generation:completed', {
       projectId: project.id,
       taskCount: createdTasks.length,
       skippedDuplicates: skipped,
+      pendingReview: pendingReview.length,
       costUsd: costData.costUsd,
     });
     emitPluginEvent('generation:completed', { projectId: project.id, taskCount: createdTasks.length });
+    recordActivity({
+      eventType: 'generation',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: costData.costUsd || null,
+      durationMs: costData.durationMs || null,
+      summary: `Generated ${createdTasks.length} task(s)${skipped ? ` (${skipped} duplicates skipped)` : ''}`,
+      extra: { taskCount: createdTasks.length, skippedDuplicates: skipped },
+    });
 
     return createdTasks;
   } catch (err) {
@@ -341,6 +417,17 @@ export async function runGeneration(project, templateId, modelId, promptContent)
     broadcast('generation:failed', {
       projectId: project.id,
       error: err.message,
+    });
+    recordActivity({
+      eventType: 'generation',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'failed',
+      costUsd: null,
+      durationMs: null,
+      summary: `Generation failed: ${err.message}`,
     });
     throw err;
   } finally {
@@ -357,8 +444,8 @@ export async function runPlanning(task, modelId) {
   const prompt = buildPlanningPrompt(task);
   const { cmd, args, useStdin } = buildGenerationCommand(modelId, prompt);
 
-  state.updateTask(task.id, { status: 'planning' });
-  broadcast('planning:started', { taskId: task.id });
+  state.updateTask(task.id, { status: 'planning', plannedBy: modelId });
+  broadcast('planning:started', { taskId: task.id, plannedBy: modelId });
   const agentId = registerAgent({ type: 'planning', projectId: project.id, taskId: task.id, modelId });
 
   writeReplayEvent(task.id, 'planning', {
@@ -377,7 +464,7 @@ export async function runPlanning(task, modelId) {
     },
     logStream
   );
-  state.setProcess(task.id, proc);
+  state.setProcess(task.id, { proc, phase: 'planning' });
 
   try {
     const stdout = await promise;
@@ -410,6 +497,17 @@ export async function runPlanning(task, modelId) {
       costUsd: existingCost + planningCost,
     });
     broadcast('planning:completed', { taskId: task.id, plan, plannedBy: modelId, costUsd: planningCost });
+    recordActivity({
+      eventType: 'planning',
+      taskId: task.id,
+      taskTitle: task.title,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: planningCost || null,
+      durationMs: costData.durationMs || null,
+      summary: `Planned task: ${task.title}`,
+    });
 
     // Run post-planning hooks
     try {
@@ -429,6 +527,17 @@ export async function runPlanning(task, modelId) {
     if (state.getTask(task.id)) {
       state.updateTask(task.id, { status: 'proposed', agentLog: err.message });
       broadcast('planning:failed', { taskId: task.id, error: err.message });
+      recordActivity({
+        eventType: 'planning',
+        taskId: task.id,
+        taskTitle: task.title,
+        projectId: project.id,
+        projectName: project.name,
+        status: 'failed',
+        costUsd: null,
+        durationMs: null,
+        summary: `Planning failed for: ${task.title}`,
+      });
       emitNotification('task:failed', {
         projectId: project.id,
         taskId: task.id,
@@ -446,13 +555,147 @@ export async function runPlanning(task, modelId) {
   }
 }
 
-export async function runExecution(task, modelId) {
+export async function runRanking(project, modelId) {
+  modelId = modelId || DEFAULT_MODEL_ID;
+  const proposedTasks = state.getTasks(project.id).filter(t => t.status === 'proposed');
+  if (proposedTasks.length === 0) throw new Error('No proposed tasks to rank');
+
+  const prompt = buildRankingPrompt(project.path, proposedTasks);
+  const { cmd, args, useStdin } = buildRankingCommand(modelId, prompt);
+
+  broadcast('ranking:started', { projectId: project.id });
+  const agentId = registerAgent({ type: 'ranking', projectId: project.id, modelId });
+
+  writeReplayEvent(project.id, 'ranking', {
+    type: 'prompt_sent', phase: 'ranking', projectId: project.id, modelId, prompt,
+    cmd, args: args.filter(a => a !== prompt),
+  });
+
+  try {
+    const { promise } = spawnAgent(
+      cmd, args, project.path,
+      useStdin ? prompt : null,
+      (bytes) => { broadcast('ranking:progress', { projectId: project.id, bytesReceived: bytes }); },
+      null
+    );
+    const stdout = await promise;
+    const costData = extractCostData(stdout, prompt, modelId);
+
+    writeReplayEvent(project.id, 'ranking', {
+      type: 'response_received', phase: 'ranking', projectId: project.id, modelId,
+      rawResponse: stdout.slice(0, 100000),
+      costUsd: costData.costUsd, inputTokens: costData.inputTokens,
+      outputTokens: costData.outputTokens, durationMs: costData.durationMs, numTurns: costData.numTurns,
+    });
+
+    const rankingItems = parseRankingOutput(costData.agentText);
+
+    writeReplayEvent(project.id, 'ranking', {
+      type: 'parsed_output', phase: 'ranking', projectId: project.id,
+      parsedResult: rankingItems, itemCount: rankingItems.length,
+    });
+
+    // Extract ordered task IDs, filtering to only valid proposed tasks
+    const proposedIds = new Set(proposedTasks.map(t => t.id));
+    const rankedIds = rankingItems
+      .map(item => item.taskId)
+      .filter(id => proposedIds.has(id));
+
+    // Append any proposed tasks the LLM missed to the end
+    for (const t of proposedTasks) {
+      if (!rankedIds.includes(t.id)) rankedIds.push(t.id);
+    }
+
+    // Reorder tasks
+    state.reorderTasks(rankedIds);
+
+    // Split cost evenly across ranked tasks
+    const costPerTask = costData.costUsd ? costData.costUsd / rankedIds.length : 0;
+    const tokenShareInput = costData.inputTokens ? Math.round(costData.inputTokens / rankedIds.length) : 0;
+    const tokenShareOutput = costData.outputTokens ? Math.round(costData.outputTokens / rankedIds.length) : 0;
+
+    for (const taskId of rankedIds) {
+      const task = state.getTask(taskId);
+      if (!task) continue;
+      state.updateTask(taskId, {
+        tokenUsage: {
+          ...(task.tokenUsage || {}),
+          ranking: { input: tokenShareInput, output: tokenShareOutput },
+        },
+        costUsd: (task.costUsd || 0) + costPerTask,
+      });
+    }
+
+    // Persist ranking data on each task and build reasoning map
+    const reasoningMap = {};
+    for (const item of rankingItems) {
+      if (item.taskId && item.reasoning) reasoningMap[item.taskId] = item.reasoning;
+      if (item.taskId) {
+        const rankUpdates = {};
+        if (item.rank != null) rankUpdates.rankingRank = Number(item.rank) || null;
+        if (item.score != null) rankUpdates.rankingScore = Number(item.score) || null;
+        if (item.reasoning) rankUpdates.rankingReason = item.reasoning;
+        if (Object.keys(rankUpdates).length > 0) {
+          state.updateTask(item.taskId, rankUpdates);
+        }
+      }
+    }
+
+    broadcast('ranking:completed', {
+      projectId: project.id,
+      rankedIds,
+      rankedCount: rankedIds.length,
+      reasoning: reasoningMap,
+      costUsd: costData.costUsd,
+    });
+    broadcast('tasks:reordered', { orderedIds: rankedIds });
+    recordActivity({
+      eventType: 'ranking',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: costData.costUsd || null,
+      durationMs: costData.durationMs || null,
+      summary: `Ranked ${rankedIds.length} tasks`,
+      extra: { rankedCount: rankedIds.length },
+    });
+
+    return { rankedIds, reasoning: reasoningMap, costUsd: costData.costUsd };
+  } catch (err) {
+    writeReplayEvent(project.id, 'ranking', {
+      type: 'error', phase: 'ranking', projectId: project.id,
+      error: err.message, stack: err.stack?.slice(0, 2000),
+    });
+    broadcast('ranking:failed', { projectId: project.id, error: err.message });
+    recordActivity({
+      eventType: 'ranking',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'failed',
+      costUsd: null,
+      durationMs: null,
+      summary: `Ranking failed: ${err.message}`,
+    });
+    throw err;
+  } finally {
+    compressReplayLog(project.id, 'ranking').catch(() => {});
+    unregisterAgent(agentId);
+  }
+}
+
+export async function runExecution(task, modelId, options = {}) {
   modelId = modelId || DEFAULT_MODEL_ID;
   const project = state.getProject(task.projectId);
   if (!project) throw new Error('Project not found');
 
-  if (!state.lockProject(project.id)) {
-    throw new Error('Project is already being executed on');
+  if (!options.lockHeld) {
+    if (!state.lockProject(project.id)) {
+      throw new Error('Project is already being executed on');
+    }
   }
 
   const budget = checkBudget(project);
@@ -508,8 +751,23 @@ export async function runExecution(task, modelId) {
   const { cmd, args, useStdin } = buildExecutionCommand(modelId, prompt);
 
   state.updateTask(task.id, { status: 'executing', executedBy: modelId });
-  broadcast('execution:started', { taskId: task.id });
+  broadcast('execution:started', { taskId: task.id, executedBy: modelId });
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
+
+  // File conflict detection
+  if (task.plan) {
+    const taskFiles = extractFilePaths(task.plan);
+    if (taskFiles.length > 0) {
+      state.updateTask(task.id, { trackedFiles: taskFiles });
+      const otherExecuting = state.getTasks(project.id)
+        .filter(t => t.id !== task.id && (t.status === 'executing' || t.status === 'queued') && t.trackedFiles)
+        .map(t => ({ id: t.id, title: t.title, trackedFiles: t.trackedFiles }));
+      const conflicts = findFileConflicts(task.id, taskFiles, otherExecuting);
+      if (conflicts.length > 0) {
+        broadcast('execution:file-conflicts', { taskId: task.id, conflicts });
+      }
+    }
+  }
 
   writeReplayEvent(task.id, 'execution', {
     type: 'prompt_sent', phase: 'execution', taskId: task.id, projectId: project.id, modelId, prompt,
@@ -529,7 +787,7 @@ export async function runExecution(task, modelId) {
     logStream
   );
 
-  state.setProcess(task.id, { proc, stopPolling });
+  state.setProcess(task.id, { proc, stopPolling, phase: 'executing' });
 
   try {
     const stdout = await promise;
@@ -591,6 +849,26 @@ export async function runExecution(task, modelId) {
     // Exclude diff from broadcast to avoid large WebSocket payloads
     const { diff: _diff, ...broadcastUpdates } = updates;
     broadcast('execution:completed', { taskId: task.id, ...broadcastUpdates, result, costUsd: executionCost });
+    recordActivity({
+      eventType: 'execution',
+      taskId: task.id,
+      taskTitle: task.title,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: executionCost || null,
+      durationMs: costData.durationMs || null,
+      summary: `Executed task: ${task.title}`,
+      extra: { commitHash: result.commitHash || null },
+    });
+
+    // Notify dependents that they may now be unblocked
+    const dependents = state.getDependents(task.id);
+    if (dependents.length > 0) {
+      for (const dep of dependents) {
+        broadcast('task:updated', { ...dep, _blocked: state.isTaskBlocked(dep.id) });
+      }
+    }
 
     // Run task validators
     try {
@@ -645,24 +923,131 @@ export async function runExecution(task, modelId) {
       }
     }
 
-    // Auto-test after execution commit if enabled
+    // Test-gated execution: run tests after a successful commit when autoTestOnCommit is enabled
     if (result.commitHash && project.autoTestOnCommit) {
-      broadcast('project:test-started', { projectId: project.id });
-      runTests(project).then((testResult) => {
-        broadcast('project:test-completed', { projectId: project.id, passed: testResult.passed, summary: testResult.summary, output: testResult.output });
+      broadcast('project:test-started', { projectId: project.id, taskId: task.id });
+      try {
+        const testResult = await runTests(project);
+        state.updateProject(project.id, {
+          lastTestResult: {
+            passed: testResult.passed,
+            summary: testResult.summary,
+            output: testResult.output,
+            timestamp: Date.now(),
+          },
+        });
+        broadcast('project:test-completed', {
+          projectId: project.id,
+          taskId: task.id,
+          passed: testResult.passed,
+          summary: testResult.summary,
+        });
+
         if (!testResult.passed) {
+          // ROLLBACK: revert the commit
+          const revertCwd = toWSLPath(project.path);
+          if (project.branchStrategy === 'per-task' && preCommitHash) {
+            // Per-task branch: safe to hard reset
+            try {
+              await gitExec(['reset', '--hard', preCommitHash], revertCwd);
+            } catch (resetErr) {
+              console.error('Git reset failed:', resetErr.message);
+            }
+          } else {
+            // Direct branch: use revert to preserve history
+            try {
+              await gitExec(['revert', '--no-edit', result.commitHash], revertCwd);
+            } catch (revertErr) {
+              console.error('Git revert failed:', revertErr.message);
+              try { await gitExec(['revert', '--abort'], revertCwd); } catch { /* ignore */ }
+            }
+          }
+
+          // Mark task as failed
+          const currentTask = state.getTask(task.id);
+          const newFailureCount = (currentTask.failureCount || 0) + 1;
+          state.updateTask(task.id, {
+            status: 'failed',
+            failureCount: newFailureCount,
+            lastTestOutput: (testResult.output || testResult.summary || '').slice(0, 50000),
+            agentLog: `Test-gated execution failed (attempt #${newFailureCount}). Tests did not pass after commit ${result.commitHash.slice(0, 7)}.\n\nTest summary: ${testResult.summary}`,
+          });
+          broadcast('execution:test-failed', {
+            taskId: task.id,
+            commitHash: result.commitHash,
+            testSummary: testResult.summary,
+            failureCount: newFailureCount,
+            status: 'failed',
+          });
+          recordActivity({
+            eventType: 'execution',
+            taskId: task.id,
+            taskTitle: task.title,
+            projectId: project.id,
+            projectName: project.name,
+            status: 'test-failed',
+            costUsd: executionCost || null,
+            durationMs: costData.durationMs || null,
+            summary: `Tests failed after executing: ${task.title}`,
+            extra: { passed: false, testSummary: testResult.summary },
+          });
           emitNotification('test:failure', {
             projectId: project.id,
+            taskId: task.id,
+            taskTitle: task.title,
             summary: testResult.summary,
           });
+
+          return state.getTask(task.id);
         }
-      }).catch((err) => {
-        broadcast('project:test-completed', { projectId: project.id, passed: false, summary: err.message || 'Auto-test failed', output: '' });
-        emitNotification('test:failure', {
+      } catch (testErr) {
+        console.error('Test execution error:', testErr.message);
+        broadcast('project:test-completed', {
           projectId: project.id,
-          summary: err.message || 'Auto-test failed',
+          taskId: task.id,
+          passed: false,
+          summary: testErr.message || 'Test execution error',
         });
-      });
+      }
+    }
+
+    // Auto-create PR if enabled and on per-task branch
+    const currentTask = state.getTask(task.id);
+    if (branchName && project.autoCreatePR && currentTask && currentTask.status === 'done' && currentTask.commitHash && !currentTask.prUrl) {
+      try {
+        const prBody = renderPRBody(project.prTemplate, currentTask);
+        await gitExec(['push', '-u', 'origin', branchName], cwd);
+
+        const prArgs = ['pr', 'create', '--head', branchName, '--title', currentTask.title, '--body', prBody];
+        if (project.prBaseBranch) prArgs.push('--base', project.prBaseBranch);
+        if (project.prReviewers) prArgs.push('--reviewer', project.prReviewers);
+
+        const prOutput = await new Promise((resolve, reject) => {
+          execFile('gh', prArgs, { cwd, timeout: 30000 }, (err, stdout) => {
+            if (err) return reject(err);
+            resolve(stdout.trim());
+          });
+        });
+
+        const prUrl = prOutput.trim();
+        const prNumberMatch = prUrl.match(/\/pull\/(\d+)$/);
+        const prNumber = prNumberMatch ? parseInt(prNumberMatch[1]) : null;
+
+        state.updateTask(task.id, { prUrl, prNumber });
+        broadcast('task:updated', state.getTask(task.id));
+
+        if (prNumber) {
+          trackPR(task.id, project.id, prNumber);
+          try {
+            const prStatus = await fetchPRStatus(project.path, prNumber);
+            state.updateTask(task.id, { prStatus });
+            broadcast('task:pr-status', { taskId: task.id, prStatus });
+          } catch { /* initial status fetch is best-effort */ }
+        }
+      } catch (prErr) {
+        console.error('Auto-PR creation failed:', prErr.message);
+        broadcast('pr:creation-failed', { taskId: task.id, error: prErr.message });
+      }
     }
 
     return updated;
@@ -678,6 +1063,17 @@ export async function runExecution(task, modelId) {
       : `Execution failed (agent exited unexpectedly). The previous agent may have left partial changes in the working directory. Error: ${err.message}`;
     state.updateTask(task.id, { status: revertStatus, agentLog });
     broadcast('execution:failed', { taskId: task.id, error: agentLog, aborted, status: revertStatus });
+    recordActivity({
+      eventType: 'execution',
+      taskId: task.id,
+      taskTitle: task.title,
+      projectId: project.id,
+      projectName: project.name,
+      status: aborted ? 'aborted' : 'failed',
+      costUsd: null,
+      durationMs: null,
+      summary: aborted ? `Aborted: ${task.title}` : `Execution failed: ${task.title}`,
+    });
     emitPluginEvent('execution:failed', { taskId: task.id, error: agentLog, aborted });
     emitNotification('task:failed', {
       projectId: project.id,
@@ -733,8 +1129,23 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
   const { cmd, args, useStdin } = buildExecutionCommand(modelId, prompt);
 
   state.updateTask(task.id, { status: 'executing', executedBy: modelId });
-  broadcast('execution:started', { taskId: task.id });
+  broadcast('execution:started', { taskId: task.id, executedBy: modelId });
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
+
+  // File conflict detection (worktree)
+  if (task.plan) {
+    const taskFiles = extractFilePaths(task.plan);
+    if (taskFiles.length > 0) {
+      state.updateTask(task.id, { trackedFiles: taskFiles });
+      const otherExecuting = state.getTasks(project.id)
+        .filter(t => t.id !== task.id && (t.status === 'executing' || t.status === 'queued') && t.trackedFiles)
+        .map(t => ({ id: t.id, title: t.title, trackedFiles: t.trackedFiles }));
+      const conflicts = findFileConflicts(task.id, taskFiles, otherExecuting);
+      if (conflicts.length > 0) {
+        broadcast('execution:file-conflicts', { taskId: task.id, conflicts });
+      }
+    }
+  }
 
   writeReplayEvent(task.id, 'execution', {
     type: 'prompt_sent', phase: 'execution', taskId: task.id, projectId: project.id, modelId, prompt,
@@ -754,7 +1165,7 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     wtLogStream
   );
 
-  state.setProcess(task.id, { proc, stopPolling });
+  state.setProcess(task.id, { proc, stopPolling, phase: 'executing' });
 
   try {
     const stdout = await promise;
@@ -810,6 +1221,18 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     const updated = state.updateTask(task.id, updates);
     const { diff: _diff, ...broadcastUpdates } = updates;
     broadcast('execution:completed', { taskId: task.id, ...broadcastUpdates, result, costUsd: executionCost });
+    recordActivity({
+      eventType: 'execution',
+      taskId: task.id,
+      taskTitle: task.title,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: executionCost || null,
+      durationMs: costData.durationMs || null,
+      summary: `Executed task (worktree): ${task.title}`,
+      extra: { commitHash: result.commitHash || null },
+    });
 
     // Run task validators
     try {
@@ -848,6 +1271,17 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
     const agentLog = `Execution failed in worktree: ${err.message}`;
     state.updateTask(task.id, { status: revertStatus, agentLog });
     broadcast('execution:failed', { taskId: task.id, error: agentLog, aborted: false, status: revertStatus });
+    recordActivity({
+      eventType: 'execution',
+      taskId: task.id,
+      taskTitle: task.title,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'failed',
+      costUsd: null,
+      durationMs: null,
+      summary: `Execution failed (worktree): ${task.title}`,
+    });
     emitPluginEvent('execution:failed', { taskId: task.id, error: agentLog, aborted: false });
     throw err;
   } finally {
@@ -861,9 +1295,11 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
 
 export { spawnAgent, extractCostData };
 
-export async function runTestSetup(project, testInfo) {
-  if (!state.lockProject(project.id)) {
-    throw new Error('Project is already being executed on');
+export async function runTestSetup(project, testInfo, options = {}) {
+  if (!options.lockHeld) {
+    if (!state.lockProject(project.id)) {
+      throw new Error('Project is already being executed on');
+    }
   }
 
   const prompt = buildTestSetupPrompt(project.path, testInfo);
@@ -916,6 +1352,18 @@ export async function runTestSetup(project, testInfo) {
       commitHash: result.commitHash || null,
       testCommand: result.testCommand || null,
     });
+    recordActivity({
+      eventType: 'setup-tests',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'success',
+      costUsd: costData.costUsd || null,
+      durationMs: costData.durationMs || null,
+      summary: `Test setup complete${result.testCommand ? `: ${result.testCommand}` : ''}`,
+      extra: { testCommand: result.testCommand || null },
+    });
 
     return result;
   } catch (err) {
@@ -926,6 +1374,17 @@ export async function runTestSetup(project, testInfo) {
     broadcast('setup-tests:failed', {
       projectId: project.id,
       error: err.message,
+    });
+    recordActivity({
+      eventType: 'setup-tests',
+      taskId: null,
+      taskTitle: null,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'failed',
+      costUsd: null,
+      durationMs: null,
+      summary: `Test setup failed: ${err.message}`,
     });
     throw err;
   } finally {

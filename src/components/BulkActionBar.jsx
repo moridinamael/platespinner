@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 
-export default function BulkActionBar({ selectedIds, tasks, onDismissAll, onPlanAll, onChangeEffort, onClearSelection, models }) {
+export default function BulkActionBar({ selectedIds, tasks, onDismissAll, onPlanAll, onChangeEffort, onClearSelection, models, disabled }) {
   const count = selectedIds.size;
   const [confirmingDismiss, armDismiss, resetDismiss] = useConfirm();
   const [bulkEffort, setBulkEffort] = useState('medium');
@@ -26,6 +26,7 @@ export default function BulkActionBar({ selectedIds, tasks, onDismissAll, onPlan
       {hasDismissable && (
         <button
           className={`btn btn-dismiss${confirmingDismiss ? ' confirming' : ''}`}
+          disabled={disabled}
           onClick={() => {
             if (confirmingDismiss) {
               resetDismiss();
@@ -55,6 +56,7 @@ export default function BulkActionBar({ selectedIds, tasks, onDismissAll, onPlan
           )}
           <button
             className="btn btn-plan"
+            disabled={disabled}
             onClick={() => onPlanAll(bulkModel || models[0]?.id)}
           >
             Plan All
@@ -77,6 +79,7 @@ export default function BulkActionBar({ selectedIds, tasks, onDismissAll, onPlan
           </select>
           <button
             className="btn btn-edit"
+            disabled={disabled}
             onClick={() => onChangeEffort(bulkEffort)}
           >
             Set Effort

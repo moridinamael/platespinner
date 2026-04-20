@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react';
-import { api, WebSocketManager } from './api.js';
-import { updateProgress, clearProgress } from './progressStore.js';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { api } from './api.js';
 import Sidebar from './components/Sidebar.jsx';
 import GenerateBar from './components/GenerateBar.jsx';
 import FilterBar from './components/FilterBar.jsx';
@@ -8,95 +7,131 @@ import KanbanBoard from './components/KanbanBoard.jsx';
 import BulkActionBar from './components/BulkActionBar.jsx';
 import CardModal from './components/CardModal.jsx';
 import PlatesSpinning from './components/PlatesSpinning.jsx';
+import ActivityFeed from './components/ActivityFeed.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-import { matchesFilters } from './utils.js';
+import AnalyticsDashboard from './components/AnalyticsDashboard.jsx';
+import SkillEditor from './components/SkillEditor.jsx';
+import LoginScreen from './components/LoginScreen.jsx';
+import Toast from './components/Toast.jsx';
+import { useTheme } from './hooks/useTheme.js';
+import { useWebSocket } from './hooks/useWebSocket.js';
+import { useProjects } from './hooks/useProjects.js';
+import { useTasks } from './hooks/useTasks.js';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
+import { useActivityFeed } from './hooks/useActivityFeed.js';
+import { useProjectActivity } from './hooks/useProjectActivity.js';
 
 export default function App() {
-  const [theme, setTheme] = useState(() => {
-    const saved = localStorage.getItem('kanban-theme');
-    if (saved === 'light' || saved === 'dark') return saved;
-    if (window.matchMedia?.('(prefers-color-scheme: light)').matches) return 'light';
-    return 'dark';
-  });
+  const { theme, toggleTheme } = useTheme();
 
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('kanban-theme', theme);
-  }, [theme]);
+  // Auth state
+  const [authState, setAuthState] = useState(null);
+  const [authRequired, setAuthRequired] = useState(false);
 
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e) => {
-      if (!localStorage.getItem('kanban-theme')) {
-        setTheme(e.matches ? 'dark' : 'light');
-      }
-    };
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-
-  const toggleTheme = useCallback(() => {
-    setTheme(prev => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('kanban-theme', next);
-      return next;
-    });
-  }, []);
-
-  const [projects, setProjects] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
-  const [activeTab, setActiveTab] = useState('board'); // 'board' | 'preview'
-  // Per-project generation tracking: Map<projectId, { startedAt, bytesReceived }>
-  const [generatingMap, setGeneratingMap] = useState({});
-  // Per-project test setup tracking: Map<projectId, { startedAt, bytesReceived }>
-  const [setupMap, setSetupMap] = useState({});
-  // Per-project test setup results: Map<projectId, { success, summary, ... }>
-  const [setupResultMap, setSetupResultMap] = useState({});
-  // Per-task execution start times: Map<taskId, timestamp>
-  const [execStartTimes, setExecStartTimes] = useState({});
-  // Per-task planning start times: Map<taskId, timestamp>
-  const [planStartTimes, setPlanStartTimes] = useState({});
-  // Per-project test status: Map<projectId, { running: boolean, result?: { passed, summary, output } }>
-  const [testStatusMap, setTestStatusMap] = useState({});
-  // Per-project Railway status: Map<projectId, { status: 'unknown'|'checking'|'healthy'|'failed', message: string, checkedAt: number }>
-  const [railwayStatusMap, setRailwayStatusMap] = useState({});
+  // Toast
   const [statusMessage, setStatusMessage] = useState(null);
-  const [selectedTask, setSelectedTask] = useState(null);
+  const [statusType, setStatusType] = useState('info');
+  const statusTimerRef = useRef(null);
+
+  const showToast = useCallback((text, type = 'info', duration = 3000) => {
+    clearTimeout(statusTimerRef.current);
+    setStatusMessage(text);
+    setStatusType(type);
+    statusTimerRef.current = setTimeout(() => setStatusMessage(null), duration);
+  }, []);
+
+  useEffect(() => () => clearTimeout(statusTimerRef.current), []);
+
+  // Projects
+  const {
+    projects, setProjects,
+    selectedProjectId, setSelectedProjectId,
+    selectedProject,
+    handleAddProject, handleRemoveProject,
+    handleUpdateProjectUrl, handleReorderProjects,
+    handleProjectWsEvent,
+  } = useProjects(showToast);
+
+  // Tasks
+  const {
+    tasks, setTasks, selectedTask, setSelectedTask,
+    execStartTimes, setExecStartTimes, planStartTimes, setPlanStartTimes,
+    generatingMap, setupMap, setupResultMap, rankingMap,
+    selectedIds, setSelectedIds, bulkInFlight, replayResults,
+    logStreamVersion, filters, setFilters,
+    projectTasks, filteredTasks, blockedTaskIds, blockersByTaskId,
+    filterActive, hasActiveAgents, streamingLog,
+    logBufferRef,
+    handlePlan, handleExecute, handleDismiss, handleAbort,
+    handleUpdateTask, handleDequeue, handleRetry, handleMoveTask,
+    handleReorderTasks, handleStopAll,
+    handleMerge, handleCreatePR, handleMergePR,
+    handleCreateFixTask,
+    handlePlanAll, handleExecuteAll, handleRankProposals,
+    handleToggleSelect, handleBulkDismiss, handleBulkPlan,
+    handleBulkEffort, handleClearSelection, handleCloseModal,
+    handleClearSetupResult,
+    handleTaskWsEvent,
+  } = useTasks({ selectedProjectId, showToast });
+
+  const {
+    activities,
+    unreadCount,
+    lastSeenTimestamp,
+    markAllRead,
+    dismissEntry,
+    handleActivityWsEvent,
+  } = useActivityFeed();
+
+  const { unreadCountByProject, markProjectSeen } = useProjectActivity(tasks, projects);
+
+  const [activityFeedOpen, setActivityFeedOpen] = useState(false);
+
+  const toggleActivityFeed = useCallback(() => {
+    setActivityFeedOpen(prev => {
+      if (!prev) markAllRead();
+      return !prev;
+    });
+  }, [markAllRead]);
+
+  // App-level UI state
+  const [activeTab, setActiveTab] = useState('board');
+  const [models, setModels] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('builtin:pareto-simple');
-  const wsRef = useRef(null);
-  // Batched progress updates for generation and setup-tests (flushed every ~200ms)
-  const pendingProgressRef = useRef({ generating: {}, setup: {} });
-  const flushTimerRef = useRef(null);
-  // Log streaming buffer: taskId → accumulated log string
-  const logBufferRef = useRef({});
-  const [logStreamVersion, setLogStreamVersion] = useState(0);
-  const logFlushTimerRef = useRef(null);
+  const [testStatusMap, setTestStatusMap] = useState({});
+  const [railwayStatusMap, setRailwayStatusMap] = useState({});
   const [agentCensus, setAgentCensus] = useState(null);
   const [autoclickerStatus, setAutoclickerStatus] = useState(null);
   const [notificationSettings, setNotificationSettings] = useState(null);
-  const [filters, setFilters] = useState({
-    search: '', efforts: [], statuses: [], modelId: '', hasPlan: false, dateFrom: '', dateTo: '',
-  });
-  const [selectedIds, setSelectedIds] = useState(new Set());
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [focusedCardIndex, setFocusedCardIndex] = useState(-1);
-  const [replayResults, setReplayResults] = useState({});
+  const [showSkillEditor, setShowSkillEditor] = useState(false);
+  const [editingSkill, setEditingSkill] = useState(null);
 
-  const selectedProject = useMemo(
-    () => projects.find((p) => p.id === selectedProjectId),
-    [projects, selectedProjectId]
-  );
+  // Keyboard shortcuts
+  const { focusedTaskId, setFocusedTaskId } = useKeyboardShortcuts({
+    selectedIds, setSelectedIds,
+    selectedTask, setSelectedTask,
+    activeTab,
+    filteredTasks,
+    commandPaletteOpen, setCommandPaletteOpen,
+    activityFeedOpen, toggleActivityFeed, setActivityFeedOpen,
+    handlePlan, handleExecute, handleDismiss,
+  });
 
-  const [models, setModels] = useState([]);
+  // Auth check
+  useEffect(() => {
+    api.authStatus().then(({ required, authenticated }) => {
+      setAuthRequired(required);
+      setAuthState(!required || authenticated ? 'ok' : 'login');
+    }).catch(() => setAuthState('ok'));
+  }, []);
 
   // Load initial data
   useEffect(() => {
     api.getProjects().then((loaded) => {
       setProjects(loaded);
-      // Hydrate testStatusMap from cached lastTestResult on each project
       const testStatuses = {};
       for (const p of loaded) {
         if (p.lastTestResult) {
@@ -109,7 +144,6 @@ export default function App() {
       if (Object.keys(testStatuses).length > 0) {
         setTestStatusMap(testStatuses);
       }
-      // Hydrate railwayStatusMap from cached lastRailwayResult on each project
       const railwayStatuses = {};
       for (const p of loaded) {
         if (p.lastRailwayResult) {
@@ -123,11 +157,11 @@ export default function App() {
       if (Object.keys(railwayStatuses).length > 0) {
         setRailwayStatusMap(railwayStatuses);
       }
-    }).catch(console.error);
+    }).catch(err => showToast('Failed to load projects: ' + err.message, 'error', 5000));
     api.getTemplates().then(setTemplates).catch(console.error);
     api.getModels().then(setModels).catch(console.error);
     api.getAgentStatus().then(setAgentCensus).catch(console.error);
-    api.getAutoclickerStatus().then(setAutoclickerStatus).catch(() => {});
+    api.getAutoclickerStatus().then(setAutoclickerStatus).catch(err => console.warn('Failed to load autoclicker status:', err));
     api.getNotificationSettings().then(setNotificationSettings).catch(console.error);
     api.getTasks().then((loaded) => {
       setTasks(loaded);
@@ -139,483 +173,45 @@ export default function App() {
       }
       setExecStartTimes(execStarts);
       setPlanStartTimes(planStarts);
-    }).catch(console.error);
-    // Hydrate queue positions from server
+    }).catch(err => showToast('Failed to load tasks: ' + err.message, 'error', 5000));
     api.getQueues().then((queues) => {
-      // queues is { projectId: [{ taskId, position }], ... }
+      const queueMap = {};
+      for (const [projectId, entries] of Object.entries(queues)) {
+        const m = new Map();
+        for (const entry of entries) m.set(entry.taskId, entry);
+        queueMap[projectId] = m;
+      }
       setTasks((prev) => prev.map((t) => {
-        const projectQueue = queues[t.projectId];
+        const projectQueue = queueMap[t.projectId];
         if (!projectQueue) return t;
-        const entry = projectQueue.find((q) => q.taskId === t.id);
+        const entry = projectQueue.get(t.id);
         if (entry) return { ...t, queuePosition: entry.position };
         return t;
       }));
     }).catch(console.error);
   }, []);
 
-  // Flush batched generation/setup progress to React state
-  const flushProgress = useCallback(() => {
-    flushTimerRef.current = null;
-    const pending = pendingProgressRef.current;
-    const genUpdates = pending.generating;
-    const setupUpdates = pending.setup;
-    pending.generating = {};
-    pending.setup = {};
-    const hasGen = Object.keys(genUpdates).length > 0;
-    const hasSetup = Object.keys(setupUpdates).length > 0;
-    if (!hasGen && !hasSetup) return;
-    startTransition(() => {
-      if (hasGen) {
-        setGeneratingMap(prev => {
-          const next = { ...prev };
-          for (const [pid, upd] of Object.entries(genUpdates)) {
-            if (next[pid]) next[pid] = { ...next[pid], bytesReceived: upd.bytesReceived };
-          }
-          return next;
-        });
-      }
-      if (hasSetup) {
-        setSetupMap(prev => {
-          const next = { ...prev };
-          for (const [pid, upd] of Object.entries(setupUpdates)) {
-            if (next[pid]) next[pid] = { ...next[pid], bytesReceived: upd.bytesReceived };
-          }
-          return next;
-        });
-      }
-    });
-  }, []);
+  // WebSocket — delegates task/project events to sub-hooks, handles app-level events
+  useWebSocket({
+    handleProjectWsEvent,
+    handleTaskWsEvent,
+    handleActivityWsEvent,
+    setTestStatusMap,
+    setRailwayStatusMap,
+    setAgentCensus,
+    setAutoclickerStatus,
+    setNotificationSettings,
+    showToast,
+  });
 
-  const scheduleFlush = useCallback(() => {
-    if (flushTimerRef.current != null) return;
-    flushTimerRef.current = setTimeout(flushProgress, 200);
-  }, [flushProgress]);
-
-  // WebSocket connection
-  const handleWsMessage = useCallback((event, data) => {
-    switch (event) {
-      case 'project:created':
-        setProjects((prev) => [...prev, data]);
-        break;
-      case 'project:updated':
-        setProjects((prev) => prev.map((p) => (p.id === data.id ? data : p)));
-        break;
-      case 'project:removed':
-        setProjects((prev) => prev.filter((p) => p.id !== data.id));
-        setTasks((prev) => prev.filter((t) => t.projectId !== data.id));
-        setTestStatusMap((prev) => { const next = { ...prev }; delete next[data.id]; return next; });
-        setRailwayStatusMap((prev) => { const next = { ...prev }; delete next[data.id]; return next; });
-        break;
-      case 'projects:reordered': {
-        const { orderedIds } = data;
-        setProjects((prev) => {
-          const map = new Map(prev.map(p => [p.id, p]));
-          const reordered = orderedIds.map(id => map.get(id)).filter(Boolean);
-          const remaining = prev.filter(p => !orderedIds.includes(p.id));
-          return [...reordered, ...remaining];
-        });
-        break;
-      }
-      case 'tasks:reordered': {
-        const { orderedIds } = data;
-        setTasks(prev => {
-          const updated = [...prev];
-          for (let i = 0; i < orderedIds.length; i++) {
-            const idx = updated.findIndex(t => t.id === orderedIds[i]);
-            if (idx !== -1) updated[idx] = { ...updated[idx], sortOrder: i };
-          }
-          return updated;
-        });
-        break;
-      }
-      case 'task:created':
-        setTasks((prev) => [...prev, data]);
-        break;
-      case 'task:updated':
-        setTasks((prev) => prev.map((t) => (t.id === data.id ? data : t)));
-        setSelectedTask((prev) => (prev && prev.id === data.id ? data : prev));
-        break;
-      case 'task:dismissed':
-        clearProgress(data.id);
-        setTasks((prev) => prev.filter((t) => t.id !== data.id));
-        setPlanStartTimes((prev) => {
-          const next = { ...prev };
-          delete next[data.id];
-          return next;
-        });
-        setSelectedIds((prev) => {
-          if (!prev.has(data.id)) return prev;
-          const next = new Set(prev);
-          next.delete(data.id);
-          return next;
-        });
-        break;
-
-      // --- Per-project generation ---
-      case 'generation:started':
-        setGeneratingMap((prev) => ({
-          ...prev,
-          [data.projectId]: { startedAt: Date.now(), bytesReceived: 0 },
-        }));
-        break;
-      case 'generation:progress':
-        pendingProgressRef.current.generating[data.projectId] = { bytesReceived: data.bytesReceived };
-        scheduleFlush();
-        break;
-      case 'generation:completed': {
-        delete pendingProgressRef.current.generating[data.projectId];
-        setGeneratingMap((prev) => {
-          const next = { ...prev };
-          delete next[data.projectId];
-          return next;
-        });
-        const msg = data.skippedDuplicates
-          ? `Generated ${data.taskCount} tasks (${data.skippedDuplicates} duplicates skipped)`
-          : `Generated ${data.taskCount} tasks`;
-        setStatusMessage(msg);
-        setTimeout(() => setStatusMessage(null), 3000);
-        break;
-      }
-      case 'generation:failed':
-        delete pendingProgressRef.current.generating[data.projectId];
-        setGeneratingMap((prev) => {
-          const next = { ...prev };
-          delete next[data.projectId];
-          return next;
-        });
-        setStatusMessage(`Generation failed: ${data.error}`);
-        setTimeout(() => setStatusMessage(null), 5000);
-        break;
-
-      // --- Planning ---
-      case 'planning:started':
-        clearProgress(data.taskId);
-        setPlanStartTimes((prev) => ({ ...prev, [data.taskId]: Date.now() }));
-        setTasks((prev) =>
-          prev.map((t) => (t.id === data.taskId ? { ...t, status: 'planning' } : t))
-        );
-        break;
-      case 'planning:progress':
-        updateProgress(data.taskId, { bytesReceived: data.bytesReceived });
-        break;
-      case 'planning:completed':
-        clearProgress(data.taskId);
-        delete logBufferRef.current[data.taskId];
-        setPlanStartTimes((prev) => {
-          const next = { ...prev };
-          delete next[data.taskId];
-          return next;
-        });
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === data.taskId
-              ? { ...t, status: 'planned', plan: data.plan, plannedBy: data.plannedBy,
-                  costUsd: data.costUsd != null ? (t.costUsd || 0) + data.costUsd : t.costUsd }
-              : t
-          )
-        );
-        break;
-      case 'planning:failed':
-        clearProgress(data.taskId);
-        delete logBufferRef.current[data.taskId];
-        setPlanStartTimes((prev) => {
-          const next = { ...prev };
-          delete next[data.taskId];
-          return next;
-        });
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === data.taskId ? { ...t, status: 'proposed', agentLog: data.error } : t
-          )
-        );
-        setStatusMessage(`Planning failed: ${data.error}`);
-        setTimeout(() => setStatusMessage(null), 5000);
-        break;
-
-      // --- Execution with stable start times ---
-      case 'execution:started':
-        clearProgress(data.taskId);
-        setExecStartTimes((prev) => ({ ...prev, [data.taskId]: Date.now() }));
-        setTasks((prev) =>
-          prev.map((t) => (t.id === data.taskId ? { ...t, status: 'executing' } : t))
-        );
-        break;
-      case 'execution:progress':
-        updateProgress(data.taskId, { bytesReceived: data.bytesReceived });
-        break;
-      case 'execution:git':
-        updateProgress(data.taskId, { gitSummary: data.summary, gitFiles: data.files });
-        break;
-      case 'execution:git-untracked':
-        updateProgress(data.taskId, { gitUntracked: data.files });
-        break;
-      case 'execution:queued':
-        setTasks((prev) =>
-          prev.map((t) => (t.id === data.taskId ? { ...t, status: 'queued', queuePosition: data.position } : t))
-        );
-        break;
-      case 'execution:queue-advanced':
-        setTasks((prev) =>
-          prev.map((t) => {
-            if (t.id === data.startedTaskId) return t; // Will be updated by execution:started
-            const idx = data.queue?.indexOf(t.id);
-            if (idx !== undefined && idx !== -1) {
-              return { ...t, queuePosition: idx + 1 };
-            }
-            return t;
-          })
-        );
-        break;
-      case 'execution:dequeued':
-        setTasks((prev) =>
-          prev.map((t) => {
-            if (t.id !== data.taskId) return t;
-            const revertStatus = t.plan ? 'planned' : 'proposed';
-            return { ...t, status: revertStatus, queuePosition: undefined };
-          })
-        );
-        break;
-      case 'execution:queue-updated':
-        setTasks((prev) => prev.map((t) => {
-          if (t.projectId !== data.projectId) return t;
-          const entry = data.queue.find((q) => q.taskId === t.id);
-          if (entry) return { ...t, queuePosition: entry.position };
-          // Clear stale queuePosition for tasks no longer in queue
-          if (t.queuePosition !== undefined) {
-            const { queuePosition: _, ...rest } = t;
-            return rest;
-          }
-          return t;
-        }));
-        break;
-      case 'execution:completed':
-        clearProgress(data.taskId);
-        delete logBufferRef.current[data.taskId];
-        setExecStartTimes((prev) => {
-          const next = { ...prev };
-          delete next[data.taskId];
-          return next;
-        });
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === data.taskId
-              ? { ...t, status: 'done', commitHash: data.commitHash, agentLog: data.agentLog,
-                  branch: data.branch || t.branch, baseBranch: data.baseBranch || t.baseBranch,
-                  costUsd: data.costUsd != null ? (t.costUsd || 0) + data.costUsd : t.costUsd,
-                  tokenUsage: data.tokenUsage || t.tokenUsage }
-              : t
-          )
-        );
-        break;
-      case 'execution:failed':
-        clearProgress(data.taskId);
-        delete logBufferRef.current[data.taskId];
-        setExecStartTimes((prev) => {
-          const next = { ...prev };
-          delete next[data.taskId];
-          return next;
-        });
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === data.taskId ? { ...t, status: data.status || 'proposed', agentLog: data.error } : t
-          )
-        );
-        setStatusMessage(data.aborted ? 'Task aborted' : `Execution failed: ${data.error}`);
-        setTimeout(() => setStatusMessage(null), 5000);
-        break;
-      case 'log:chunk': {
-        const key = data.taskId;
-        logBufferRef.current[key] = (logBufferRef.current[key] || '') + data.chunk;
-        // Throttled flush for UI update
-        if (!logFlushTimerRef.current) {
-          logFlushTimerRef.current = setTimeout(() => {
-            logFlushTimerRef.current = null;
-            setLogStreamVersion(v => v + 1);
-          }, 300);
-        }
-        break;
-      }
-      case 'project:test-started':
-        startTransition(() => {
-          setTestStatusMap((prev) => ({
-            ...prev,
-            [data.projectId]: { running: true },
-          }));
-        });
-        break;
-      case 'project:test-completed':
-        startTransition(() => {
-          setTestStatusMap((prev) => ({
-            ...prev,
-            [data.projectId]: {
-              running: false,
-              result: { passed: data.passed, summary: data.summary, output: data.output, checkedAt: Date.now() },
-            },
-          }));
-        });
-        break;
-      case 'project:railway-checking':
-        startTransition(() => {
-          setRailwayStatusMap((prev) => ({
-            ...prev,
-            [data.projectId]: { ...prev[data.projectId], status: 'checking' },
-          }));
-        });
-        break;
-      case 'project:railway-status':
-        startTransition(() => {
-          setRailwayStatusMap((prev) => ({
-            ...prev,
-            [data.projectId]: {
-              status: data.healthy ? 'healthy' : 'failed',
-              message: data.message,
-              checkedAt: data.timestamp || Date.now(),
-            },
-          }));
-        });
-        break;
-      case 'setup-tests:started':
-        setSetupMap((prev) => ({
-          ...prev,
-          [data.projectId]: { startedAt: Date.now(), bytesReceived: 0 },
-        }));
-        setSetupResultMap((prev) => {
-          const next = { ...prev };
-          delete next[data.projectId];
-          return next;
-        });
-        break;
-      case 'setup-tests:progress':
-        pendingProgressRef.current.setup[data.projectId] = { bytesReceived: data.bytesReceived };
-        scheduleFlush();
-        break;
-      case 'setup-tests:completed':
-        delete pendingProgressRef.current.setup[data.projectId];
-        setSetupMap((prev) => {
-          const next = { ...prev };
-          delete next[data.projectId];
-          return next;
-        });
-        setSetupResultMap((prev) => ({
-          ...prev,
-          [data.projectId]: { success: data.success, summary: data.summary, commitHash: data.commitHash },
-        }));
-        break;
-      case 'setup-tests:failed':
-        delete pendingProgressRef.current.setup[data.projectId];
-        setSetupMap((prev) => {
-          const next = { ...prev };
-          delete next[data.projectId];
-          return next;
-        });
-        setSetupResultMap((prev) => ({
-          ...prev,
-          [data.projectId]: { success: false, summary: data.error },
-        }));
-        break;
-      case 'agents:census':
-        startTransition(() => {
-          setAgentCensus(data);
-        });
-        break;
-      case 'notification': {
-        // Trigger browser Notification API if permission granted and document is hidden
-        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-          const titleMap = {
-            'task:completed': 'Task Completed',
-            'task:failed': 'Task Failed',
-            'all-tasks:done': 'All Tasks Done!',
-            'test:failure': 'Tests Failed',
-            'budget:exceeded': 'Budget Exceeded',
-            'cost:threshold-exceeded': 'Cost Threshold Exceeded',
-            'test:notification': 'Test Notification',
-          };
-          const title = titleMap[data.type] || 'PlateSpinner Notification';
-          const body = data.taskTitle || data.summary || data.message || '';
-          new Notification(title, {
-            body: `${data.projectName}: ${body}`,
-            tag: `kanban-${data.type}-${data.taskId || data.projectId}`,
-            requireInteraction: data.type === 'all-tasks:done',
-          });
-        }
-        break;
-      }
-      case 'notification-settings:updated':
-        if (!data.projectId || data.projectId === 'global') {
-          setNotificationSettings(data.settings);
-        }
-        break;
-      case 'autoclicker:started':
-      case 'autoclicker:stopped':
-      case 'autoclicker:decision':
-      case 'autoclicker:phase':
-      case 'autoclicker:cycle-complete':
-      case 'autoclicker:error':
-      case 'autoclicker:project-paused':
-      case 'autoclicker:project-disabled':
-      case 'autoclicker:merge-conflict':
-      case 'autoclicker:merge-complete':
-        api.getAutoclickerStatus().then(setAutoclickerStatus).catch(() => {});
-        break;
-      case 'replay:completed':
-        setReplayResults(prev => ({ ...prev, [data.taskId]: data }));
-        break;
-      case 'replay:failed':
-        setReplayResults(prev => ({ ...prev, [data.taskId]: { error: data.error } }));
-        break;
-      case 'replay:progress':
-        break;
-    }
-  }, [scheduleFlush]);
-
-  useEffect(() => {
-    const manager = new WebSocketManager(handleWsMessage);
-    wsRef.current = manager;
-    return () => {
-      manager.disconnect();
-      if (flushTimerRef.current != null) {
-        clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
-      if (logFlushTimerRef.current != null) {
-        clearTimeout(logFlushTimerRef.current);
-        logFlushTimerRef.current = null;
-      }
-    };
-  }, [handleWsMessage]);
-
-  const handleAddProject = useCallback(async ({ name, path }) => {
-    try {
-      await api.addProject({ name, path });
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, []);
-
-  const handleRemoveProject = useCallback(async (id) => {
-    try {
-      await api.removeProject(id);
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-    }
-  }, []);
-
-  const handleUpdateProjectUrl = useCallback(async (id, url) => {
-    try {
-      await api.updateProject(id, { url });
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-    }
-  }, []);
-
+  // Remaining app-level callbacks
   const handleGenerate = useCallback(async (modelId, promptContent) => {
     try {
       await api.generate(selectedProjectId, selectedTemplateId, modelId, promptContent);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
+      showToast(err.message, 'error');
     }
-  }, [selectedProjectId, selectedTemplateId]);
+  }, [selectedProjectId, selectedTemplateId, showToast]);
 
   const handleCreateTemplate = useCallback(async ({ name, content }) => {
     try {
@@ -623,10 +219,9 @@ export default function App() {
       setTemplates((prev) => [...prev, created]);
       setSelectedTemplateId(created.id);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleDeleteTemplate = useCallback(async (id) => {
     try {
@@ -634,506 +229,78 @@ export default function App() {
       setTemplates((prev) => prev.filter((t) => t.id !== id));
       setSelectedTemplateId((prev) => (prev === id ? 'builtin:pareto-simple' : prev));
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
+    }
+  }, [showToast]);
+
+  const handleOpenSkillEditor = useCallback((sk = null) => {
+    setEditingSkill(sk);
+    setShowSkillEditor(true);
+  }, []);
+
+  const handleSaveSkill = useCallback(async ({ id, name, content }) => {
+    if (id) {
+      const updated = await api.updateTemplate(id, { name, content });
+      setTemplates(prev => prev.map(t => t.id === id ? { ...t, ...updated } : t));
+    } else {
+      const created = await api.createTemplate({ name, content });
+      setTemplates(prev => [...prev, created]);
+      setSelectedTemplateId(created.id);
     }
   }, []);
 
-  const handlePlan = useCallback(async (taskId, modelId) => {
-    try {
-      await api.planTask(taskId, modelId);
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, []);
-
-  const handleExecute = useCallback(async (taskId, modelId) => {
-    try {
-      await api.executeTask(taskId, modelId);
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, []);
-
-  const handleDismiss = useCallback(async (taskId) => {
-    try {
-      await api.dismissTask(taskId);
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-    }
-  }, []);
-
-  const handleAbort = useCallback(async (taskId) => {
-    try {
-      await api.abortTask(taskId);
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, []);
-
-  const handleUpdateTask = useCallback(async (taskId, updates) => {
-    try {
-      const updated = await api.updateTask(taskId, updates);
-      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-      setSelectedTask((prev) => (prev && prev.id === updated.id ? updated : prev));
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, []);
-
-  const handleDequeue = useCallback(async (taskId) => {
-    try {
-      await api.dequeueTask(taskId);
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, []);
-
-  const handleCreateFixTask = useCallback(async (projectId, summary, output) => {
-    try {
-      await api.createFixTask(projectId, { summary, output });
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
+  const handleImportSkills = useCallback(async (skillsArr) => {
+    const results = await api.importSkills(skillsArr);
+    setTemplates(prev => [...prev, ...results]);
   }, []);
 
   const handleStartAutoclicker = useCallback(async (config) => {
     try {
       await api.startAutoclicker(config);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
+
+  const handleStopAutoclicker = useCallback(async () => {
+    try {
+      await api.stopAutoclicker();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }, [showToast]);
 
   const handleUpdateNotificationSettings = useCallback(async (updates) => {
     try {
       const updated = await api.updateNotificationSettings(null, updates);
       setNotificationSettings(updated);
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleTestNotification = useCallback(async () => {
     try {
       await api.testNotification();
     } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      showToast(err.message, 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleRequestNotificationPermission = useCallback(async () => {
     if (!('Notification' in window)) return;
     await Notification.requestPermission();
   }, []);
 
-  const handleMerge = async (taskId, strategy) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    try {
-      const result = await api.mergeTask(task.projectId, taskId, strategy || 'merge');
-      setStatusMessage(result.message || 'Branch merged successfully');
-      setTimeout(() => setStatusMessage(null), 3000);
-    } catch (err) {
-      setStatusMessage(`Merge failed: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 5000);
-    }
-  };
-
-  const handleCreatePR = async (taskId) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    try {
-      const result = await api.createPR(task.projectId, taskId);
-      setStatusMessage(`PR created: ${result.prUrl}`);
-      setTimeout(() => setStatusMessage(null), 5000);
-    } catch (err) {
-      setStatusMessage(`PR creation failed: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 5000);
-    }
-  };
-
-  const handleReorderProjects = async (orderedIds) => {
-    setProjects((prev) => {
-      const map = new Map(prev.map(p => [p.id, p]));
-      return orderedIds.map(id => map.get(id)).filter(Boolean);
-    });
-    try {
-      await api.reorderProjects(orderedIds);
-    } catch (err) {
-      api.getProjects().then(setProjects).catch(console.error);
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  };
-
-  const handleReorderTasks = useCallback(async (orderedIds) => {
-    setTasks(prev => {
-      const taskMap = new Map(prev.map(t => [t.id, t]));
-      orderedIds.forEach((id, i) => {
-        const t = taskMap.get(id);
-        if (t) taskMap.set(id, { ...t, sortOrder: i });
-      });
-      return [...taskMap.values()];
-    });
-    try {
-      await api.reorderTasks(orderedIds);
-    } catch (err) {
-      api.getTasks().then(setTasks).catch(console.error);
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, []);
-
-  const handleMoveTask = useCallback(async (taskId, sourceCol, targetCol) => {
-    if (sourceCol === 'proposed' && targetCol === 'plan') {
-      handlePlan(taskId);
-    } else if ((sourceCol === 'proposed' || sourceCol === 'plan') && targetCol === 'executing') {
-      handleExecute(taskId);
-    }
-  }, [handlePlan, handleExecute]);
-
-  const handleStopAll = useCallback(async () => {
-    try {
-      const result = await api.stopAll();
-      setStatusMessage(`Stopped: ${result.aborted} aborted, ${result.dequeued} dequeued`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, []);
-
-  const handleStopAutoclicker = useCallback(async () => {
-    try {
-      await api.stopAutoclicker();
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, []);
-
-  // Filter persistence via localStorage
-  useEffect(() => {
-    const key = `kanban-filters-${selectedProjectId || 'all'}`;
-    const saved = localStorage.getItem(key);
-    if (saved) {
-      try { setFilters(JSON.parse(saved)); } catch { /* ignore */ }
-    } else {
-      setFilters({ search: '', efforts: [], statuses: [], modelId: '', hasPlan: false, dateFrom: '', dateTo: '' });
-    }
-    setSelectedIds(new Set());
-  }, [selectedProjectId]);
-
-  useEffect(() => {
-    const key = `kanban-filters-${selectedProjectId || 'all'}`;
-    localStorage.setItem(key, JSON.stringify(filters));
-  }, [filters, selectedProjectId]);
-
-  // Comprehensive filtering
-  const projectTasks = useMemo(
-    () => selectedProjectId
-      ? tasks.filter((t) => t.projectId === selectedProjectId)
-      : tasks,
-    [tasks, selectedProjectId]
-  );
-
-  const filteredTasks = useMemo(
-    () => projectTasks.filter((t) => matchesFilters(t, filters)),
-    [projectTasks, filters]
-  );
-
-  const handlePlanAll = useCallback(async () => {
-    const proposedIds = filteredTasks
-      .filter(t => t.status === 'proposed')
-      .map(t => t.id);
-    if (proposedIds.length === 0) return;
-    try {
-      await api.batchAction('plan', proposedIds);
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, [filteredTasks]);
-
-  const handleExecuteAll = useCallback(async () => {
-    const plannedIds = filteredTasks
-      .filter(t => t.status === 'planned')
-      .sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity))
-      .map(t => t.id);
-    if (plannedIds.length === 0) return;
-    try {
-      await api.batchAction('execute', plannedIds);
-    } catch (err) {
-      setStatusMessage(`Error: ${err.message}`);
-      setTimeout(() => setStatusMessage(null), 3000);
-    }
-  }, [filteredTasks]);
-
-  const filterActive = !!(filters.search || filters.efforts.length || filters.statuses.length || filters.modelId || filters.hasPlan || filters.dateFrom || filters.dateTo);
-
-  const hasActiveAgents = useMemo(() =>
-    tasks.some(t => t.status === 'executing' || t.status === 'planning' || t.status === 'queued'),
-    [tasks]
-  );
-
-  // Clean up selection when filtered tasks change (remove IDs not visible)
-  useEffect(() => {
-    const visibleIds = new Set(filteredTasks.map((t) => t.id));
-    setSelectedIds((prev) => {
-      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [filteredTasks]);
-
-  // Selection toggle
-  const handleToggleSelect = useCallback((taskId) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(taskId)) next.delete(taskId);
-      else next.add(taskId);
-      return next;
-    });
-  }, []);
-
-  // Bulk actions
-  const handleBulkDismiss = async () => {
-    const ids = [...selectedIds].filter((id) => {
-      const t = tasks.find((t2) => t2.id === id);
-      return t && ['proposed', 'planned', 'planning', 'queued'].includes(t.status);
-    });
-    setSelectedIds(new Set());
-    for (const id of ids) {
-      try { await api.dismissTask(id); } catch (err) { console.error(err); }
-    }
-  };
-
-  const handleBulkPlan = async (modelId) => {
-    const ids = [...selectedIds].filter((id) => {
-      const t = tasks.find((t2) => t2.id === id);
-      return t && t.status === 'proposed';
-    });
-    setSelectedIds(new Set());
-    for (const id of ids) {
-      try { await api.planTask(id, modelId); } catch (err) { console.error(err); }
-    }
-  };
-
-  const handleBulkEffort = async (effort) => {
-    const ids = [...selectedIds].filter((id) => {
-      const t = tasks.find((t2) => t2.id === id);
-      return t && (t.status === 'proposed' || t.status === 'planned');
-    });
-    for (const id of ids) {
-      try { await api.updateTask(id, { effort }); } catch (err) { console.error(err); }
-    }
-    setSelectedIds(new Set());
-  };
-
-  // Column definitions for keyboard navigation
-  const COLUMNS = useMemo(() => [
-    { key: 'proposed', statuses: ['proposed'] },
-    { key: 'plan', statuses: ['planning', 'planned'] },
-    { key: 'executing', statuses: ['queued', 'executing'] },
-    { key: 'done', statuses: ['done'] },
-  ], []);
-
-  // Compute focusedTaskId from index
-  const focusedTaskId = focusedCardIndex >= 0 && focusedCardIndex < filteredTasks.length
-    ? filteredTasks[focusedCardIndex].id : null;
-
-  // Reset focused index when filteredTasks change
-  useEffect(() => {
-    setFocusedCardIndex(prev => {
-      if (prev < 0) return prev;
-      if (prev >= filteredTasks.length) return -1;
-      return prev;
-    });
-  }, [filteredTasks]);
-
-  // Scroll focused card into view
-  useEffect(() => {
-    if (focusedCardIndex >= 0) {
-      document.querySelector('.card-focused')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }
-  }, [focusedCardIndex]);
-
-  // Comprehensive keyboard shortcuts
-  useEffect(() => {
-    const handler = (e) => {
-      const tag = document.activeElement?.tagName;
-      const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-
-      // Cmd/Ctrl+K: toggle command palette (always works)
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setCommandPaletteOpen(prev => !prev);
-        return;
-      }
-
-      // Escape: priority chain (always works)
-      if (e.key === 'Escape') {
-        if (commandPaletteOpen) {
-          setCommandPaletteOpen(false);
-          return;
-        }
-        if (selectedTask) {
-          setSelectedTask(null);
-          return;
-        }
-        if (selectedIds.size > 0) {
-          setSelectedIds(new Set());
-          return;
-        }
-        if (focusedCardIndex >= 0) {
-          setFocusedCardIndex(-1);
-          return;
-        }
-        return;
-      }
-
-      // Skip all other shortcuts when in input or command palette is open
-      if (isInput || commandPaletteOpen) return;
-
-      // Ctrl/Cmd+A: select all visible
-      if ((e.metaKey || e.ctrlKey) && e.key === 'a' && activeTab === 'board' && !selectedTask) {
-        e.preventDefault();
-        setSelectedIds(new Set(filteredTasks.map((t) => t.id)));
-        return;
-      }
-
-      // Skip remaining shortcuts if modal is open
-      if (selectedTask) return;
-
-      // Only work on board tab
-      if (activeTab !== 'board') return;
-
-      // Arrow Down / j: next card
-      if (e.key === 'ArrowDown' || e.key === 'j') {
-        e.preventDefault();
-        if (filteredTasks.length === 0) return;
-        setFocusedCardIndex(prev => prev < 0 ? 0 : (prev + 1) % filteredTasks.length);
-        return;
-      }
-
-      // Arrow Up / k: previous card
-      if (e.key === 'ArrowUp' || e.key === 'k') {
-        e.preventDefault();
-        if (filteredTasks.length === 0) return;
-        setFocusedCardIndex(prev => prev <= 0 ? filteredTasks.length - 1 : prev - 1);
-        return;
-      }
-
-      // Arrow Left / h: jump to previous column
-      if (e.key === 'ArrowLeft' || e.key === 'h') {
-        e.preventDefault();
-        if (filteredTasks.length === 0 || focusedCardIndex < 0) return;
-        const currentTask = filteredTasks[focusedCardIndex];
-        const currentColIdx = COLUMNS.findIndex(c => c.statuses.includes(currentTask.status));
-        for (let ci = currentColIdx - 1; ci >= 0; ci--) {
-          const colTasks = filteredTasks.filter(t => COLUMNS[ci].statuses.includes(t.status));
-          if (colTasks.length > 0) {
-            const idx = filteredTasks.indexOf(colTasks[0]);
-            setFocusedCardIndex(idx);
-            return;
-          }
-        }
-        return;
-      }
-
-      // Arrow Right / l: jump to next column
-      if (e.key === 'ArrowRight' || e.key === 'l') {
-        e.preventDefault();
-        if (filteredTasks.length === 0 || focusedCardIndex < 0) return;
-        const currentTask = filteredTasks[focusedCardIndex];
-        const currentColIdx = COLUMNS.findIndex(c => c.statuses.includes(currentTask.status));
-        for (let ci = currentColIdx + 1; ci < COLUMNS.length; ci++) {
-          const colTasks = filteredTasks.filter(t => COLUMNS[ci].statuses.includes(t.status));
-          if (colTasks.length > 0) {
-            const idx = filteredTasks.indexOf(colTasks[0]);
-            setFocusedCardIndex(idx);
-            return;
-          }
-        }
-        return;
-      }
-
-      // Enter: open focused card
-      if (e.key === 'Enter' && focusedCardIndex >= 0) {
-        e.preventDefault();
-        setSelectedTask(filteredTasks[focusedCardIndex]);
-        return;
-      }
-
-      // 1-4: jump to column
-      if (['1', '2', '3', '4'].includes(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
-        const colIdx = parseInt(e.key) - 1;
-        const col = COLUMNS[colIdx];
-        const firstInCol = filteredTasks.findIndex(t => col.statuses.includes(t.status));
-        if (firstInCol >= 0) setFocusedCardIndex(firstInCol);
-        return;
-      }
-
-      // p: plan focused card
-      if (e.key === 'p' && focusedCardIndex >= 0) {
-        const task = filteredTasks[focusedCardIndex];
-        if (task.status === 'proposed') {
-          e.preventDefault();
-          handlePlan(task.id);
-        }
-        return;
-      }
-
-      // e: execute focused card
-      if (e.key === 'e' && focusedCardIndex >= 0) {
-        const task = filteredTasks[focusedCardIndex];
-        if (task.status === 'planned') {
-          e.preventDefault();
-          handleExecute(task.id);
-        }
-        return;
-      }
-
-      // d: dismiss focused card
-      if (e.key === 'd' && focusedCardIndex >= 0) {
-        const task = filteredTasks[focusedCardIndex];
-        if (['proposed', 'planned'].includes(task.status)) {
-          e.preventDefault();
-          handleDismiss(task.id);
-        }
-        return;
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [selectedIds.size, selectedTask, activeTab, filteredTasks, commandPaletteOpen, focusedCardIndex, handlePlan, handleExecute, handleDismiss, COLUMNS]);
-
   const handleSelectProject = useCallback((id) => {
     setSelectedProjectId(id);
     setActiveTab('board');
-  }, []);
-
-  const handleClearSetupResult = useCallback((id) => {
-    setSetupResultMap((prev) => { const next = { ...prev }; delete next[id]; return next; });
-  }, []);
+    if (id) markProjectSeen(id);
+  }, [setSelectedProjectId, markProjectSeen]);
 
   const handleClearTestResult = useCallback((id) => {
     setTestStatusMap((prev) => { const next = { ...prev }; delete next[id]; return next; });
   }, []);
-
-  const handleCloseModal = useCallback(() => setSelectedTask(null), []);
-
-  const handleClearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
   const selectedTaskProject = useMemo(
     () => selectedTask ? projects.find((p) => p.id === selectedTask.projectId) : null,
@@ -1141,6 +308,11 @@ export default function App() {
   );
 
   const hasPreview = selectedProject?.url;
+
+  if (authState === null) return null;
+  if (authState === 'login') {
+    return <LoginScreen onSuccess={() => setAuthState('ok')} />;
+  }
 
   return (
     <div className="app">
@@ -1167,16 +339,20 @@ export default function App() {
           onTestNotification={handleTestNotification}
           onRequestNotificationPermission={handleRequestNotificationPermission}
           onReorderProjects={handleReorderProjects}
+          onShowToast={showToast}
           tasks={tasks}
+          unreadCountByProject={unreadCountByProject}
+          onMarkProjectSeen={markProjectSeen}
           theme={theme}
           onToggleTheme={toggleTheme}
+          authRequired={authRequired}
+          onLogout={async () => { await api.logout(); setAuthState('login'); }}
         />
       </ErrorBoundary>
       <main className="main">
         <GenerateBar
           generatingMap={generatingMap}
           onGenerate={handleGenerate}
-          statusMessage={statusMessage}
           selectedProjectId={selectedProjectId}
           projects={projects}
           templates={templates}
@@ -1184,6 +360,7 @@ export default function App() {
           onSelectTemplate={setSelectedTemplateId}
           onCreateTemplate={handleCreateTemplate}
           onDeleteTemplate={handleDeleteTemplate}
+          onOpenSkillEditor={handleOpenSkillEditor}
           models={models}
         />
         {hasActiveAgents && (
@@ -1196,22 +373,28 @@ export default function App() {
           onFiltersChange={setFilters}
           models={models}
         />
-        {hasPreview && (
-          <div className="tab-bar">
-            <button
-              className={`tab ${activeTab === 'board' ? 'tab-active' : ''}`}
-              onClick={() => setActiveTab('board')}
-            >
-              Board
-            </button>
+        <div className="tab-bar">
+          <button
+            className={`tab ${activeTab === 'board' ? 'tab-active' : ''}`}
+            onClick={() => setActiveTab('board')}
+          >
+            Board
+          </button>
+          <button
+            className={`tab ${activeTab === 'dashboard' ? 'tab-active' : ''}`}
+            onClick={() => setActiveTab('dashboard')}
+          >
+            Dashboard
+          </button>
+          {hasPreview && (
             <button
               className={`tab ${activeTab === 'preview' ? 'tab-active' : ''}`}
               onClick={() => setActiveTab('preview')}
             >
               Preview
             </button>
-          </div>
-        )}
+          )}
+        </div>
         {activeTab === 'board' ? (
           <ErrorBoundary name="Board">
             <KanbanBoard
@@ -1227,6 +410,7 @@ export default function App() {
               onSelectTask={setSelectedTask}
               onMerge={handleMerge}
               onCreatePR={handleCreatePR}
+              onMergePR={handleMergePR}
               models={models}
               selectedIds={selectedIds}
               onToggleSelect={handleToggleSelect}
@@ -1236,6 +420,12 @@ export default function App() {
               focusedTaskId={focusedTaskId}
               onReorderTasks={handleReorderTasks}
               onMoveTask={handleMoveTask}
+              onRetry={handleRetry}
+              blockedTaskIds={blockedTaskIds}
+              blockersByTaskId={blockersByTaskId}
+              onFocusTask={setFocusedTaskId}
+              onRankProposals={handleRankProposals}
+              rankingMap={rankingMap}
             />
             {selectedIds.size > 0 && (
               <BulkActionBar
@@ -1246,8 +436,18 @@ export default function App() {
                 onChangeEffort={handleBulkEffort}
                 onClearSelection={handleClearSelection}
                 models={models}
+                disabled={bulkInFlight}
               />
             )}
+          </ErrorBoundary>
+        ) : activeTab === 'dashboard' ? (
+          <ErrorBoundary name="Dashboard">
+            <AnalyticsDashboard
+              selectedProjectId={selectedProjectId}
+              projects={projects}
+              models={models}
+              tasks={tasks}
+            />
           </ErrorBoundary>
         ) : (
           <div className="preview-container">
@@ -1278,16 +478,43 @@ export default function App() {
           onUpdateTask={handleUpdateTask}
           onMerge={handleMerge}
           onCreatePR={handleCreatePR}
+          onMergePR={handleMergePR}
           models={models}
-          streamingLog={selectedTask ? (logBufferRef.current[selectedTask.id] || '') : ''}
+          streamingLog={streamingLog}
           logStreamVersion={logStreamVersion}
           replayResult={selectedTask ? replayResults[selectedTask.id] : null}
+          allTasks={tasks}
+          blockedTaskIds={blockedTaskIds}
+          onShowToast={showToast}
         />
       </ErrorBoundary>
+      <button className="activity-bell" onClick={toggleActivityFeed} title="Activity feed">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+        {unreadCount > 0 && (
+          <span className="activity-bell-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+        )}
+      </button>
+      <ActivityFeed
+        isOpen={activityFeedOpen}
+        activities={activities}
+        lastSeenTimestamp={lastSeenTimestamp}
+        onClose={() => setActivityFeedOpen(false)}
+        onSelectTask={(task) => { setSelectedTask(task); setActivityFeedOpen(false); }}
+        onExecute={handleExecute}
+        onPlan={handlePlan}
+        onRetry={handleRetry}
+        onMarkAllRead={markAllRead}
+        onDismissEntry={dismissEntry}
+        tasks={tasks}
+      />
       <PlatesSpinning
         tasks={tasks}
         generatingMap={generatingMap}
         setupMap={setupMap}
+        rankingMap={rankingMap}
         models={models}
         agentCensus={agentCensus}
       />
@@ -1302,8 +529,24 @@ export default function App() {
           onExecute={handleExecute}
           onDismiss={handleDismiss}
           onClose={() => setCommandPaletteOpen(false)}
+          onToggleActivityFeed={toggleActivityFeed}
+          onShowRecentCompletions={() => { setActivityFeedOpen(true); markAllRead(); }}
+          onShowUnreadActivity={() => { setActivityFeedOpen(true); }}
+          activityFeedOpen={activityFeedOpen}
         />
       )}
+      {showSkillEditor && (
+        <SkillEditor
+          skill={editingSkill}
+          skills={templates}
+          project={projects.find(p => p.id === selectedProjectId)}
+          onSave={handleSaveSkill}
+          onClose={() => setShowSkillEditor(false)}
+          onDelete={handleDeleteTemplate}
+          onImport={handleImportSkills}
+        />
+      )}
+      <Toast message={statusMessage} type={statusType} onDismiss={() => setStatusMessage(null)} />
     </div>
   );
 }

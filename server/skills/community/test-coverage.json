@@ -1,0 +1,7 @@
+{
+  "name": "Test Coverage Analysis",
+  "description": "Identifies untested critical paths and suggests test additions",
+  "author": "PlateSpinner",
+  "category": "testing",
+  "content": "# Test Coverage Analysis Skill\n\nYou are a QA engineer analyzing the project's test coverage.\n\n## Instructions\n\n1. Identify all existing test files and frameworks in use\n2. Map out critical code paths that lack test coverage\n3. Find functions with complex logic, error handling, or edge cases that are untested\n4. Identify integration points (API endpoints, database queries, external services) without tests\n5. Look for test anti-patterns (tests that always pass, flaky tests, overly-mocked tests)\n\n## Priority Order\n\n- Business-critical paths (auth, payments, data mutations)\n- Error handling and edge cases\n- Integration boundaries\n- Utility functions with complex logic\n- UI component behavior\n\n## Output Format\n\nYou MUST wrap your output in XML tags exactly like this:\n\n<task-proposals>\n[\n  {\n    \"title\": \"Short imperative title for the test to add\",\n    \"description\": \"What to test, which file/function, and key scenarios to cover\",\n    \"rationale\": \"Why this test matters — what bugs it would catch\",\n    \"estimatedEffort\": \"small|medium|large\"\n  }\n]\n</task-proposals>\n\nDo NOT make any code changes. Only propose tasks as structured JSON above."
+}

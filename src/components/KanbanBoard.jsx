@@ -8,9 +8,10 @@ const COLUMNS = [
   { key: 'plan', title: 'Plan', statuses: ['planning', 'planned'] },
   { key: 'executing', title: 'Executing', statuses: ['queued', 'executing'] },
   { key: 'done', title: 'Done', statuses: ['done'] },
+  { key: 'failed', title: 'Failed', statuses: ['failed'] },
 ];
 
-function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, models, selectedIds, onToggleSelect, filterActive, onPlanAll, onExecuteAll, focusedTaskId, onReorderTasks, onMoveTask }) {
+function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecute, onPlan, onDismiss, onAbort, onDequeue, onSelectTask, onMerge, onCreatePR, onMergePR, models, selectedIds, onToggleSelect, filterActive, onPlanAll, onExecuteAll, focusedTaskId, onReorderTasks, onMoveTask, onRetry, blockedTaskIds, blockersByTaskId, onFocusTask, onRankProposals, rankingMap }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -38,8 +39,8 @@ function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecut
       }
     }
     // Sort proposed and plan columns by sortOrder
-    map['proposed'].sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
-    map['plan'].sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
+    map['proposed'] = [...map['proposed']].sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
+    map['plan'] = [...map['plan']].sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
     return map;
   }, [tasks]);
 
@@ -114,6 +115,7 @@ function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecut
             onSelectTask={onSelectTask}
             onMerge={onMerge}
             onCreatePR={onCreatePR}
+            onMergePR={onMergePR}
             models={models}
             selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
@@ -121,6 +123,12 @@ function KanbanBoard({ tasks, projects, execStartTimes, planStartTimes, onExecut
             onPlanAll={onPlanAll}
             onExecuteAll={onExecuteAll}
             focusedTaskId={focusedTaskId}
+            onRetry={onRetry}
+            blockedTaskIds={blockedTaskIds}
+            blockersByTaskId={blockersByTaskId}
+            onFocusTask={onFocusTask}
+            onRankProposals={onRankProposals}
+            rankingMap={rankingMap}
           />
         ))}
       </div>

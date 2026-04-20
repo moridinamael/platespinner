@@ -1,5 +1,6 @@
 import { broadcast } from './ws.js';
 import { getNotificationSettings, getProject, getTasks } from './state.js';
+import { resolveAndValidate } from './netguard.js';
 
 const sseClients = new Set();
 
@@ -47,22 +48,20 @@ function formatNotificationBody(notification) {
 // --- HTTP POST helper ---
 
 async function postJSON(url, payload, headers = {}) {
-  const parsed = new URL(url);
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('Only http/https URLs are allowed');
-  }
+  const { parsed, resolvedAddress } = await resolveAndValidate(url);
   const body = JSON.stringify(payload);
-  const allHeaders = { 'Content-Type': 'application/json', ...headers };
+  const allHeaders = { 'Content-Type': 'application/json', 'Host': parsed.hostname, ...headers };
 
   const mod = parsed.protocol === 'https:' ? await import('https') : await import('http');
   return new Promise((resolve, reject) => {
     const req = mod.request({
-      hostname: parsed.hostname,
+      hostname: resolvedAddress,
       port: parsed.port,
       path: parsed.pathname + parsed.search,
       method: 'POST',
       headers: allHeaders,
       timeout: 10000,
+      servername: parsed.hostname,
     }, (res) => {
       if (res.statusCode >= 200 && res.statusCode < 300) resolve();
       else reject(new Error(`HTTP ${res.statusCode}`));

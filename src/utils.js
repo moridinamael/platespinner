@@ -43,34 +43,27 @@ export function resolveTaskModelId(task) {
       : task.generatedBy;
 }
 
-export function getModelLabelForTask(task, models) {
+export function resolveTaskModel(task, models) {
   const modelId = resolveTaskModelId(task);
 
   if (modelId && models?.length) {
     const found = models.find((m) => m.id === modelId);
-    if (found) return found.label;
-    return modelId;
+    if (found) {
+      return { modelId, label: found.label, provider: found.provider };
+    }
+    return { modelId, label: modelId, provider: task.agentType || 'claude' };
   }
 
   // Backwards compat: fall back to agentType for old tasks
   if (task.agentType) {
-    return task.agentType.charAt(0).toUpperCase() + task.agentType.slice(1);
+    return {
+      modelId: null,
+      label: task.agentType.charAt(0).toUpperCase() + task.agentType.slice(1),
+      provider: task.agentType,
+    };
   }
 
-  return null;
-}
-
-export function getModelProviderForTask(task, models) {
-  const modelId = resolveTaskModelId(task);
-
-  if (modelId && models?.length) {
-    const found = models.find((m) => m.id === modelId);
-    if (found) return found.provider;
-  }
-
-  // Backwards compat
-  if (task.agentType) return task.agentType;
-  return 'claude';
+  return { modelId: null, label: null, provider: 'claude' };
 }
 
 export function formatCost(costUsd) {
@@ -78,6 +71,43 @@ export function formatCost(costUsd) {
   if (costUsd < 0.01) return `$${costUsd.toFixed(4)}`;
   if (costUsd < 1) return `$${costUsd.toFixed(3)}`;
   return `$${costUsd.toFixed(2)}`;
+}
+
+export function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export function sanitizeAnsiHtml(html) {
+  // Allow only tags that ansi-to-html legitimately produces:
+  // <span style="..."> </span> <b> </b> <u> </u> <br/> <br>
+  return html.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b([^>]*)\/?>/g, (match, tag, attrs) => {
+    const tagLower = tag.toLowerCase();
+    // Self-closing br
+    if (tagLower === 'br') return '<br/>';
+    // Closing tags for allowed elements
+    if (match.startsWith('</')) {
+      if (['span', 'b', 'u'].includes(tagLower)) return match;
+      return '';
+    }
+    // Opening tags
+    if (tagLower === 'b' || tagLower === 'u') return match;
+    if (tagLower === 'span') {
+      // Only allow style attribute, strip everything else (especially on* handlers)
+      const styleMatch = attrs.match(/\bstyle\s*=\s*"([^"]*)"/i);
+      if (styleMatch) {
+        const style = styleMatch[1].replace(/expression\s*\(|javascript\s*:|url\s*\(/gi, '');
+        return `<span style="${style}">`;
+      }
+      return '<span>';
+    }
+    // Strip all other tags (remove tag, keep inner text)
+    return '';
+  });
 }
 
 export function formatTokens(count) {

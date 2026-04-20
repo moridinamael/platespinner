@@ -1,15 +1,37 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'fs';
-import { writeFile } from 'fs/promises';
+
+// Per-collection writes: track last-written data keyed by the FINAL primary path.
+// The state module opens `<collection>.tmp.json`, writes to it, then renames it
+// to `<collection>.json`. We capture writes-per-temp-path at open/writeFile time
+// and map them to their final path at rename time.
+let lastWrittenData = null;           // last string handed to writeFile (any collection)
+const writesByFinal = new Map();      // primary path → last JSON written
+const pendingByTemp = new Map();      // temp path → last JSON pending rename
+let currentTempPath = null;
+
+const mockFileHandle = {
+  writeFile: vi.fn(async (data) => {
+    lastWrittenData = data;
+    if (currentTempPath) pendingByTemp.set(currentTempPath, data);
+  }),
+  sync: vi.fn(async () => {}),
+  close: vi.fn(async () => {}),
+};
 
 // Mock fs modules before importing state (prevents load() from touching disk)
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    readFileSync: vi.fn(() => { throw new Error('ENOENT'); }),
+    readFileSync: vi.fn(() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }),
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
+    renameSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    openSync: vi.fn(() => 99),
+    fsyncSync: vi.fn(),
+    closeSync: vi.fn(),
   };
 });
 
@@ -17,12 +39,30 @@ vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    writeFile: vi.fn(async () => {}),
+    open: vi.fn(async (path) => { currentTempPath = path; return mockFileHandle; }),
     mkdir: vi.fn(async () => {}),
+    rename: vi.fn(async (from, to) => {
+      const data = pendingByTemp.get(from);
+      if (data !== undefined) writesByFinal.set(to, data);
+      pendingByTemp.delete(from);
+    }),
+    copyFile: vi.fn(async () => {}),
   };
 });
 
+import { open, rename, copyFile } from 'fs/promises';
 import * as state from './state.js';
+
+// Helpers to query the per-collection write log.
+function getWrittenCollection(collectionFileName) {
+  for (const [path, data] of writesByFinal) {
+    if (path.endsWith(`/${collectionFileName}`) || path.endsWith(`\\${collectionFileName}`)) return data;
+  }
+  return undefined;
+}
+function renamedPaths() {
+  return rename.mock.calls.map(c => c[1]);
+}
 
 // --- Helpers (same as state.recovery.test.js) ---
 
@@ -90,12 +130,50 @@ function loadWithState(stateJson) {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  readFileSync.mockImplementation(() => { throw new Error('ENOENT'); });
+  readFileSync.mockImplementation(() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); });
   state.load(); // reset to empty
-  writeFile.mockClear();
+  lastWrittenData = null;
+  writesByFinal.clear();
+  pendingByTemp.clear();
+  currentTempPath = null;
+  mockFileHandle.writeFile.mockClear();
+  mockFileHandle.writeFile.mockImplementation(async (data) => {
+    lastWrittenData = data;
+    if (currentTempPath) pendingByTemp.set(currentTempPath, data);
+  });
+  mockFileHandle.sync.mockClear();
+  mockFileHandle.sync.mockResolvedValue(undefined);
+  mockFileHandle.close.mockClear();
+  mockFileHandle.close.mockResolvedValue(undefined);
+  open.mockClear();
+  open.mockImplementation(async (path) => { currentTempPath = path; return mockFileHandle; });
+  rename.mockClear();
+  rename.mockImplementation(async (from, to) => {
+    const data = pendingByTemp.get(from);
+    if (data !== undefined) writesByFinal.set(to, data);
+    pendingByTemp.delete(from);
+  });
+  copyFile.mockClear();
+  copyFile.mockResolvedValue(undefined);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Reset mocks to working state so flushState doesn't fail
+  mockFileHandle.writeFile.mockImplementation(async (data) => {
+    lastWrittenData = data;
+    if (currentTempPath) pendingByTemp.set(currentTempPath, data);
+  });
+  mockFileHandle.sync.mockResolvedValue(undefined);
+  mockFileHandle.close.mockResolvedValue(undefined);
+  open.mockImplementation(async (path) => { currentTempPath = path; return mockFileHandle; });
+  rename.mockImplementation(async (from, to) => {
+    const data = pendingByTemp.get(from);
+    if (data !== undefined) writesByFinal.set(to, data);
+    pendingByTemp.delete(from);
+  });
+  copyFile.mockResolvedValue(undefined);
+  // Flush any pending writes to reset _dirtyCollections/_debounceTimer state.
+  await state.flushState();
   vi.useRealTimers();
 });
 
@@ -106,10 +184,10 @@ afterEach(() => {
 describe('debounced persistence — coalescing writes', () => {
   it('single mutation triggers exactly one write after 500ms', async () => {
     state.addProject({ name: 'P', path: '/p' });
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(500);
-    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(rename).toHaveBeenCalledTimes(1);
   });
 
   it('multiple rapid mutations coalesce into a single write', async () => {
@@ -118,26 +196,26 @@ describe('debounced persistence — coalescing writes', () => {
     state.addProject({ name: 'P3', path: '/p3' });
 
     await vi.advanceTimersByTimeAsync(500);
-    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(rename).toHaveBeenCalledTimes(1);
   });
 
   it('mutations after the debounce window trigger a second write', async () => {
     state.addProject({ name: 'P1', path: '/p1' });
     await vi.advanceTimersByTimeAsync(500);
-    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(rename).toHaveBeenCalledTimes(1);
 
     state.addProject({ name: 'P2', path: '/p2' });
     await vi.advanceTimersByTimeAsync(500);
-    expect(writeFile).toHaveBeenCalledTimes(2);
+    expect(rename).toHaveBeenCalledTimes(2);
   });
 
   it('no write occurs if timer has not fully elapsed', async () => {
     state.addProject({ name: 'P', path: '/p' });
     await vi.advanceTimersByTimeAsync(400);
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(100);
-    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(rename).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -153,24 +231,22 @@ describe('serialization fidelity', () => {
     state.updateTask(t1.id, { status: 'planned', plan: 'my plan' });
 
     await vi.advanceTimersByTimeAsync(500);
-    const json = writeFile.mock.calls[writeFile.mock.calls.length - 1][1];
-    const data = JSON.parse(json);
 
-    expect(data.projects).toHaveLength(1);
-    expect(data.projects[0].name).toBe('My Project');
-    expect(data.projects[0].path).toBe('/my/project');
+    // Each collection is now persisted to its own file.
+    const projectsJson = JSON.parse(getWrittenCollection('projects.json'));
+    const tasksJson = JSON.parse(getWrittenCollection('tasks.json'));
 
-    expect(data.tasks).toHaveLength(2);
-    const titles = data.tasks.map(t => t.title).sort();
+    expect(projectsJson).toHaveLength(1);
+    expect(projectsJson[0].name).toBe('My Project');
+    expect(projectsJson[0].path).toBe('/my/project');
+
+    expect(tasksJson).toHaveLength(2);
+    const titles = tasksJson.map(t => t.title).sort();
     expect(titles).toEqual(['Task One', 'Task Two']);
 
-    const serializedT1 = data.tasks.find(t => t.id === t1.id);
+    const serializedT1 = tasksJson.find(t => t.id === t1.id);
     expect(serializedT1.status).toBe('planned');
     expect(serializedT1.plan).toBe('my plan');
-
-    expect(data.executionQueues).toBeDefined();
-    expect(data.autoclicker).toBeDefined();
-    expect(data.autoclicker.enabled).toBe(false);
   });
 
   it('persisted JSON includes execution queue state', async () => {
@@ -179,20 +255,40 @@ describe('serialization fidelity', () => {
     state.enqueueTask(proj.id, task.id);
 
     await vi.advanceTimersByTimeAsync(500);
-    const json = writeFile.mock.calls[writeFile.mock.calls.length - 1][1];
-    const data = JSON.parse(json);
+    const queuesJson = JSON.parse(getWrittenCollection('executionQueues.json'));
 
-    expect(data.executionQueues[proj.id]).toEqual([task.id]);
+    expect(queuesJson[proj.id]).toEqual([task.id]);
   });
 
   it('persisted JSON includes notification settings', async () => {
     state.updateNotificationSettings(null, { enabled: true });
 
     await vi.advanceTimersByTimeAsync(500);
-    const json = writeFile.mock.calls[writeFile.mock.calls.length - 1][1];
-    const data = JSON.parse(json);
+    const settingsJson = JSON.parse(getWrittenCollection('notificationSettings.json'));
 
-    expect(data.notificationSettings.global.enabled).toBe(true);
+    expect(settingsJson.global.enabled).toBe(true);
+  });
+
+  it('a pure task update only rewrites tasks.json (incremental-write invariant)', async () => {
+    // Seed a project so projects.json already exists and is clean.
+    const proj = state.addProject({ name: 'P', path: '/p' });
+    await vi.advanceTimersByTimeAsync(500);
+
+    rename.mockClear();
+    copyFile.mockClear();
+
+    // A task-only mutation should dirty only 'tasks' (and executionQueues
+    // for queue-touching ops — not triggered here).
+    const t = state.addTask({ projectId: proj.id, title: 'T' });
+    state.updateTask(t.id, { status: 'planned', plan: 'p' });
+    await vi.advanceTimersByTimeAsync(500);
+
+    const paths = renamedPaths();
+    expect(paths.some(p => p.endsWith('tasks.json'))).toBe(true);
+    expect(paths.some(p => p.endsWith('projects.json'))).toBe(false);
+    expect(paths.some(p => p.endsWith('promptTemplates.json'))).toBe(false);
+    expect(paths.some(p => p.endsWith('notificationSettings.json'))).toBe(false);
+    expect(paths.some(p => p.endsWith('autoclickerConfig.json'))).toBe(false);
   });
 });
 
@@ -206,25 +302,25 @@ describe('flushState behavior', () => {
     // Don't advance timer — flush immediately
     await state.flushState();
 
-    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(rename).toHaveBeenCalledTimes(1);
   });
 
   it('flushState is a no-op when state is clean', async () => {
     // load() with ENOENT = clean state, no mutations
-    writeFile.mockClear();
+    rename.mockClear();
     await state.flushState();
 
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
   });
 
   it('flushState after timer already fired does not double-write', async () => {
     state.addProject({ name: 'P', path: '/p' });
     await vi.advanceTimersByTimeAsync(500); // timer fires
-    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(rename).toHaveBeenCalledTimes(1);
 
-    writeFile.mockClear();
+    rename.mockClear();
     await state.flushState();
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
   });
 });
 
@@ -234,20 +330,90 @@ describe('flushState behavior', () => {
 
 describe('write failure and retry', () => {
   it('write failure re-marks dirty and schedules retry', async () => {
-    writeFile.mockRejectedValueOnce(new Error('disk full'));
-    writeFile.mockResolvedValue(undefined);
+    mockFileHandle.writeFile.mockRejectedValueOnce(new Error('disk full'));
+    mockFileHandle.writeFile.mockImplementation(async (data) => { lastWrittenData = data; });
 
     state.addProject({ name: 'P', path: '/p' });
     await vi.advanceTimersByTimeAsync(500); // first write — fails
-    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(rename).not.toHaveBeenCalled(); // write failed before rename
 
     await vi.advanceTimersByTimeAsync(500); // retry fires
-    expect(writeFile).toHaveBeenCalledTimes(2);
+    expect(rename).toHaveBeenCalledTimes(1);
   });
 });
 
 // ==========================================
-// Group 5: CRUD edge cases
+// Group 5: Atomic write mechanics
+// ==========================================
+
+describe('atomic write mechanics', () => {
+  it('writes to temp file, syncs, then renames to primary', async () => {
+    state.addProject({ name: 'P', path: '/p' });
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(mockFileHandle.writeFile).toHaveBeenCalledTimes(1);
+    expect(mockFileHandle.sync).toHaveBeenCalledTimes(1);
+    expect(mockFileHandle.close).toHaveBeenCalledTimes(1);
+    expect(rename).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates backup of primary before rename', async () => {
+    state.addProject({ name: 'P', path: '/p' });
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(copyFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips backup gracefully on first write when no primary exists', async () => {
+    copyFile.mockRejectedValueOnce(new Error('ENOENT'));
+    state.addProject({ name: 'P', path: '/p' });
+    await vi.advanceTimersByTimeAsync(500);
+
+    // Should still complete the rename successfully
+    expect(rename).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ==========================================
+// Group 6: Partial write recovery
+// ==========================================
+
+describe('partial write recovery', () => {
+  it('does not corrupt primary if write to temp fails', async () => {
+    mockFileHandle.writeFile.mockRejectedValueOnce(new Error('disk full'));
+    mockFileHandle.writeFile.mockImplementation(async (data) => { lastWrittenData = data; });
+
+    state.addProject({ name: 'P', path: '/p' });
+    await vi.advanceTimersByTimeAsync(500);
+
+    // rename should NOT have been called (write failed before rename)
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  it('does not corrupt primary if fsync fails', async () => {
+    mockFileHandle.sync.mockRejectedValueOnce(new Error('IO error'));
+
+    state.addProject({ name: 'P', path: '/p' });
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  it('retries after partial write failure', async () => {
+    mockFileHandle.writeFile.mockRejectedValueOnce(new Error('disk full'));
+    mockFileHandle.writeFile.mockImplementation(async (data) => { lastWrittenData = data; });
+
+    state.addProject({ name: 'P', path: '/p' });
+    await vi.advanceTimersByTimeAsync(500); // first attempt fails
+    await vi.advanceTimersByTimeAsync(500); // retry
+
+    expect(rename).toHaveBeenCalledTimes(1); // succeeds on retry
+  });
+});
+
+// ==========================================
+// Group 7: CRUD edge cases
 // ==========================================
 
 describe('CRUD edge cases', () => {

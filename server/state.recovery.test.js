@@ -1,14 +1,38 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'fs';
 
+const mockFileHandle = {
+  writeFile: vi.fn(async () => {}),
+  sync: vi.fn(async () => {}),
+  close: vi.fn(async () => {}),
+};
+
+// Per-test control over which paths "exist" for the migration-complete
+// marker / legacy-file presence checks. Default: marker absent, legacy files
+// absent — individual tests opt in by adding the relevant suffixes. Hoisted
+// so it's available to the vi.mock factory that vitest lifts above imports.
+const { existingPaths } = vi.hoisted(() => ({ existingPaths: new Set() }));
+
 // Mock fs modules before importing state (prevents load() from touching disk)
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    readFileSync: vi.fn(() => { throw new Error('ENOENT'); }),
+    readFileSync: vi.fn(() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }),
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
+    renameSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    openSync: vi.fn(() => 99),
+    fsyncSync: vi.fn(),
+    closeSync: vi.fn(),
+    existsSync: vi.fn((path) => {
+      const p = String(path);
+      for (const suffix of existingPaths) {
+        if (p.endsWith(suffix)) return true;
+      }
+      return false;
+    }),
   };
 });
 
@@ -16,8 +40,10 @@ vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    writeFile: vi.fn(async () => {}),
+    open: vi.fn(async () => mockFileHandle),
     mkdir: vi.fn(async () => {}),
+    rename: vi.fn(async () => {}),
+    copyFile: vi.fn(async () => {}),
   };
 });
 
@@ -78,13 +104,27 @@ function makeProject(overrides = {}) {
   };
 }
 
+const ENOENT = () => Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+
+// Route reads by path: legacy `state.json` returns the provided JSON blob;
+// all split-file probes (projects.json, tasks.json, etc.) and
+// `state.backup.json` return ENOENT. This forces load() through its legacy
+// migration path so the existing recovery-test fixtures (monolithic state
+// blobs) still work.
 function loadWithState(stateJson) {
-  readFileSync.mockReturnValueOnce(stateJson);
+  existingPaths.add('state.json');
+  readFileSync.mockImplementation((path) => {
+    if (typeof path === 'string' && path.endsWith('state.json') && !path.endsWith('backup.json')) {
+      return stateJson;
+    }
+    throw ENOENT();
+  });
   state.load();
 }
 
 beforeEach(() => {
-  readFileSync.mockImplementation(() => { throw new Error('ENOENT'); });
+  existingPaths.clear();
+  readFileSync.mockImplementation(() => { throw ENOENT(); });
   state.load(); // reset to empty state
 });
 
@@ -339,5 +379,150 @@ describe('crash recovery — mixed scenario', () => {
 
     // Execution queues cleared
     expect(state.getAllQueues()).toEqual({});
+  });
+});
+
+// --- Corrupt primary — backup recovery ---
+
+describe('corrupt primary — backup recovery (legacy monolithic)', () => {
+  // Path-aware helper: route reads for legacy state.json / state.backup.json
+  // to provided blobs; all split-file probes throw ENOENT so we exercise the
+  // legacy fallback path.
+  function mockLegacy({ primary, backup }) {
+    readFileSync.mockImplementation((path) => {
+      const p = String(path);
+      if (p.endsWith('state.backup.json')) {
+        if (backup === undefined) throw ENOENT();
+        return backup;
+      }
+      if (p.endsWith('state.json')) {
+        if (primary === undefined) throw ENOENT();
+        return primary;
+      }
+      throw ENOENT();
+    });
+  }
+
+  it('recovers from backup when primary contains invalid JSON', () => {
+    const proj = makeProject({ id: 'p1' });
+    const task = makeTask({ id: 't1', projectId: 'p1', status: 'proposed' });
+    mockLegacy({ primary: '{{not valid json', backup: makeState({ projects: [proj], tasks: [task] }) });
+
+    state.load();
+
+    expect(state.getProject('p1')).toBeDefined();
+    expect(state.getTask('t1')).toBeDefined();
+    expect(state.getTask('t1').status).toBe('proposed');
+  });
+
+  it('recovers from backup when primary is truncated', () => {
+    const proj = makeProject({ id: 'p1' });
+    const task = makeTask({ id: 't1', projectId: 'p1' });
+    mockLegacy({ primary: '{"projects":[{"id":"p1"', backup: makeState({ projects: [proj], tasks: [task] }) });
+
+    state.load();
+
+    expect(state.getProject('p1')).toBeDefined();
+    expect(state.getTask('t1')).toBeDefined();
+  });
+
+  it('starts empty when both primary and backup are corrupt', () => {
+    mockLegacy({ primary: 'corrupt primary', backup: 'corrupt backup too' });
+
+    state.load();
+
+    expect(state.getProjects()).toEqual([]);
+    expect(state.getTasks()).toEqual([]);
+  });
+
+  it('starts empty when primary is corrupt and backup does not exist', () => {
+    mockLegacy({ primary: 'corrupt primary' /* backup missing */ });
+
+    state.load();
+
+    expect(state.getProjects()).toEqual([]);
+    expect(state.getTasks()).toEqual([]);
+  });
+
+  it('loads from backup when primary does not exist but backup does', () => {
+    const proj = makeProject({ id: 'p1' });
+    mockLegacy({ /* primary missing */ backup: makeState({ projects: [proj] }) });
+
+    state.load();
+
+    expect(state.getProject('p1')).toBeDefined();
+  });
+
+  it('logs explicit corruption message for corrupt primary', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    mockLegacy({ primary: 'not json' /* backup missing */ });
+
+    state.load();
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Corrupt primary state file')
+    );
+    consoleSpy.mockRestore();
+  });
+});
+
+describe('split-file loading', () => {
+  it('loads from split files when they exist (no legacy fallback)', () => {
+    // No legacy present → split files trusted even without the marker.
+    const proj = makeProject({ id: 'p1' });
+    const task = makeTask({ id: 't1', projectId: 'p1', status: 'proposed' });
+    readFileSync.mockImplementation((path) => {
+      const p = String(path);
+      if (p.endsWith('/projects.json') || p.endsWith('\\projects.json')) return JSON.stringify([proj]);
+      if (p.endsWith('/tasks.json') || p.endsWith('\\tasks.json')) return JSON.stringify([task]);
+      throw ENOENT();
+    });
+
+    state.load();
+
+    expect(state.getProject('p1')).toBeDefined();
+    expect(state.getTask('t1')).toBeDefined();
+    expect(state.getTask('t1').status).toBe('proposed');
+  });
+
+  it('prefers split files over legacy state.json when both exist AND migration marker is present', () => {
+    existingPaths.add('.split-migration-complete');
+    existingPaths.add('state.json');
+    const splitProj = makeProject({ id: 'split-proj' });
+    const legacyProj = makeProject({ id: 'legacy-proj' });
+    readFileSync.mockImplementation((path) => {
+      const p = String(path);
+      if (p.endsWith('/projects.json') || p.endsWith('\\projects.json')) return JSON.stringify([splitProj]);
+      if (p.endsWith('state.json') && !p.endsWith('backup.json')) return makeState({ projects: [legacyProj] });
+      throw ENOENT();
+    });
+
+    state.load();
+
+    // Marker present → split file wins; legacy state.json ignored.
+    expect(state.getProject('split-proj')).toBeDefined();
+    expect(state.getProject('legacy-proj')).toBeUndefined();
+  });
+
+  it('prefers legacy state.json over split files when migration marker is missing', () => {
+    // Split files present but marker absent — an incomplete/aborted migration.
+    // Legacy must win to avoid loading partial split state (regression guard
+    // for the 2026-04-16 data-loss bug where partial split files shadowed the
+    // legacy monolith).
+    existingPaths.add('state.json');
+    const splitProj = makeProject({ id: 'partial-split' });
+    const legacyProj = makeProject({ id: 'legacy-proj' });
+    readFileSync.mockImplementation((path) => {
+      const p = String(path);
+      if (p.endsWith('/projects.json') || p.endsWith('\\projects.json')) return JSON.stringify([splitProj]);
+      if (p.endsWith('state.json') && !p.endsWith('backup.json')) return makeState({ projects: [legacyProj] });
+      throw ENOENT();
+    });
+
+    state.load();
+
+    expect(state.getProject('legacy-proj')).toBeDefined();
+    expect(state.getProject('partial-split')).toBeUndefined();
   });
 });

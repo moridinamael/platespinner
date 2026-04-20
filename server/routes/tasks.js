@@ -6,15 +6,30 @@ import * as state from '../state.js';
 import { LOGS_DIR } from '../state.js';
 import { broadcast } from '../ws.js';
 import { toWSLPath } from '../paths.js';
-import { runGeneration, runExecution, runPlanning, spawnAgent, extractCostData } from '../agents/runner.js';
+import { runGeneration, runExecution, runPlanning, spawnAgent, extractCostData, checkBudget } from '../agents/runner.js';
 import { readReplayLog, getReplayMeta } from '../agents/replay.js';
 import { buildGenerationCommand } from '../agents/cli.js';
 import { emitNotification } from '../notifications.js';
+import { findSimilarTasks } from '../similarity.js';
+import { isValidUUID, validateStringField, validateEnum, validateBody } from '../validation.js';
 
 const router = Router();
 
+router.param('id', (req, res, next, value) => {
+  if (!isValidUUID(value)) {
+    return res.status(400).json({ error: 'Invalid task ID format: expected a UUID' });
+  }
+  const task = state.getTask(value);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  req.task = task;
+  next();
+});
+
 router.get('/tasks', (req, res) => {
   const { projectId } = req.query;
+  if (projectId && !isValidUUID(projectId)) {
+    return res.status(400).json({ error: 'Invalid projectId format: expected a UUID' });
+  }
   const tasks = state.getTasks(projectId);
   // Strip diff field from list response to keep payload small
   res.json(tasks.map(({ diff, ...rest }) => rest));
@@ -22,6 +37,9 @@ router.get('/tasks', (req, res) => {
 
 router.get('/tasks/queue', (req, res) => {
   const { projectId } = req.query;
+  if (projectId && !isValidUUID(projectId)) {
+    return res.status(400).json({ error: 'Invalid projectId format: expected a UUID' });
+  }
   if (projectId) {
     res.json(state.getQueueSnapshot(projectId));
   } else {
@@ -34,19 +52,22 @@ router.patch('/tasks/reorder', (req, res) => {
   if (!Array.isArray(orderedIds)) {
     return res.status(400).json({ error: 'orderedIds[] is required' });
   }
+  const invalidReorderId = orderedIds.find(id => !isValidUUID(id));
+  if (invalidReorderId) {
+    return res.status(400).json({ error: `Invalid task ID format: ${invalidReorderId}` });
+  }
   state.reorderTasks(orderedIds);
   broadcast('tasks:reordered', { orderedIds });
   res.json({ message: 'Tasks reordered', count: orderedIds.length });
 });
 
 router.patch('/tasks/:id', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'proposed' && task.status !== 'planned') {
+  const task = req.task;
+  if (task.status !== 'proposed' && task.status !== 'planned' && task.status !== 'failed') {
     return res.status(400).json({ error: `Cannot edit task with status '${task.status}'` });
   }
 
-  const EDITABLE_FIELDS = ['title', 'description', 'rationale', 'effort', 'plan'];
+  const EDITABLE_FIELDS = ['title', 'description', 'rationale', 'effort', 'plan', 'dependencies'];
   const updates = {};
   for (const field of EDITABLE_FIELDS) {
     if (field in req.body) {
@@ -54,12 +75,46 @@ router.patch('/tasks/:id', (req, res) => {
     }
   }
 
+  const STRING_LIMITS = { title: 500, description: 10000, rationale: 2000, plan: 50000 };
+  for (const [field, maxLen] of Object.entries(STRING_LIMITS)) {
+    if (field in updates) {
+      const err = validateStringField(updates[field], field, { maxLength: maxLen });
+      if (err) return res.status(400).json({ error: err });
+    }
+  }
+
+  if ('title' in updates && (updates.title === null || updates.title.trim() === '')) {
+    return res.status(400).json({ error: 'title must be a non-empty string' });
+  }
+
   if (Object.keys(updates).length === 0) {
     return res.status(400).json({ error: 'No editable fields provided' });
   }
 
-  if (updates.effort && !['small', 'medium', 'large'].includes(updates.effort)) {
-    return res.status(400).json({ error: 'effort must be small, medium, or large' });
+  if ('effort' in updates) {
+    const err = validateEnum(updates.effort, 'effort', ['small', 'medium', 'large']);
+    if (err) return res.status(400).json({ error: err });
+  }
+
+  if (updates.dependencies !== undefined) {
+    if (!Array.isArray(updates.dependencies)) {
+      return res.status(400).json({ error: 'dependencies must be an array of task IDs' });
+    }
+    for (const depId of updates.dependencies) {
+      if (depId === req.params.id) {
+        return res.status(400).json({ error: 'A task cannot depend on itself' });
+      }
+      const depTask = state.getTask(depId);
+      if (!depTask) {
+        return res.status(400).json({ error: `Dependency task ${depId} not found` });
+      }
+      if (depTask.projectId !== task.projectId) {
+        return res.status(400).json({ error: 'Cross-project dependencies are not allowed' });
+      }
+      if (state.wouldCreateCycle(req.params.id, depId)) {
+        return res.status(400).json({ error: `Adding dependency ${depId} would create a cycle` });
+      }
+    }
   }
 
   const updated = state.updateTask(req.params.id, updates);
@@ -67,9 +122,19 @@ router.patch('/tasks/:id', (req, res) => {
   res.json(updated);
 });
 
-router.post('/generate', async (req, res) => {
+router.post('/generate',
+  validateBody({
+    projectId: { type: 'string' },
+    templateId: { type: 'string' },
+    modelId: { type: 'string' },
+  }),
+  async (req, res) => {
   const { projectId, templateId, modelId, promptContent } = req.body;
   let projects;
+
+  if (projectId && !isValidUUID(projectId)) {
+    return res.status(400).json({ error: 'Invalid projectId format: expected a UUID' });
+  }
 
   if (projectId) {
     const project = state.getProject(projectId);
@@ -98,11 +163,22 @@ router.post('/generate', async (req, res) => {
   }
 });
 
-router.post('/tasks/:id/plan', async (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'proposed') {
-    return res.status(400).json({ error: `Task is ${task.status}, not proposed` });
+router.post('/tasks/:id/plan',
+  validateBody({ modelId: { type: 'string' } }),
+  async (req, res) => {
+  const task = req.task;
+  if (task.status !== 'proposed' && task.status !== 'failed') {
+    return res.status(400).json({ error: `Task is ${task.status}, not proposed or failed` });
+  }
+
+  if (state.isTaskBlocked(task.id)) {
+    const blockers = state.getBlockers(task.id)
+      .filter(b => b.status !== 'done')
+      .map(b => b.title);
+    return res.status(400).json({
+      error: 'Task is blocked by unfinished dependencies',
+      blockers,
+    });
   }
 
   const { modelId } = req.body || {};
@@ -117,37 +193,47 @@ router.post('/tasks/:id/plan', async (req, res) => {
   }
 });
 
-router.post('/tasks/:id/execute', async (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (task.status !== 'proposed' && task.status !== 'planned') {
-    return res.status(400).json({ error: `Task is ${task.status}, expected proposed or planned` });
+router.post('/tasks/:id/execute',
+  validateBody({ modelId: { type: 'string' } }),
+  async (req, res) => {
+  const task = req.task;
+  if (task.status !== 'proposed' && task.status !== 'planned' && task.status !== 'failed') {
+    return res.status(400).json({ error: `Task is ${task.status}, expected proposed, planned, or failed` });
+  }
+
+  if (state.isTaskBlocked(task.id)) {
+    const blockers = state.getBlockers(task.id)
+      .filter(b => b.status !== 'done')
+      .map(b => b.title);
+    return res.status(400).json({
+      error: 'Task is blocked by unfinished dependencies',
+      blockers,
+    });
   }
 
   const { modelId } = req.body || {};
 
   // Check budget before execution
   const project = state.getProject(task.projectId);
-  if (project && project.budgetLimitUsd != null) {
-    const projectTasks = state.getTasks(task.projectId);
-    const totalSpent = projectTasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
-    if (totalSpent >= project.budgetLimitUsd) {
+  if (project) {
+    const budget = checkBudget(project);
+    if (!budget.allowed) {
       emitNotification('budget:exceeded', {
         projectId: project.id,
         taskId: task.id,
         taskTitle: task.title,
-        totalSpent,
-        limit: project.budgetLimitUsd,
+        totalSpent: budget.totalSpent,
+        limit: budget.limit,
       });
       return res.status(400).json({
         error: 'Budget limit exceeded',
-        totalSpent,
-        budgetLimit: project.budgetLimitUsd,
+        totalSpent: budget.totalSpent,
+        budgetLimit: budget.limit,
       });
     }
   }
 
-  if (state.isProjectLocked(task.projectId)) {
+  if (!state.lockProject(task.projectId)) {
     // Project is busy — enqueue instead of rejecting
     state.updateTask(task.id, { status: 'queued', executedBy: modelId || null });
     const position = state.enqueueTask(task.projectId, task.id);
@@ -156,19 +242,18 @@ router.post('/tasks/:id/execute', async (req, res) => {
     return res.json({ message: 'Queued for execution', taskId: task.id, position });
   }
 
-  // Fire and forget — results come via WebSocket
+  // Lock acquired — fire and forget, results come via WebSocket
   res.json({ message: 'Execution started', taskId: task.id });
 
   try {
-    await runExecution(task, modelId);
+    await runExecution(task, modelId, { lockHeld: true });
   } catch (err) {
     console.error('Execution failed:', err.message);
   }
 });
 
 router.post('/tasks/:id/dequeue', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const task = req.task;
   if (task.status !== 'queued') {
     return res.status(400).json({ error: `Task is ${task.status}, not queued` });
   }
@@ -182,8 +267,7 @@ router.post('/tasks/:id/dequeue', (req, res) => {
 });
 
 router.post('/tasks/:id/abort', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const task = req.task;
   if (task.status !== 'executing') {
     return res.status(400).json({ error: `Task is ${task.status}, not executing` });
   }
@@ -194,6 +278,8 @@ router.post('/tasks/:id/abort', (req, res) => {
   }
 
   state.markAborted(task.id);
+  // Stop git polling immediately on abort
+  if (handle.stopPolling) handle.stopPolling();
 
   try {
     handle.proc.kill('SIGTERM');
@@ -213,14 +299,34 @@ router.post('/tasks/:id/abort', (req, res) => {
   res.json({ message: 'Abort signal sent', taskId: task.id });
 });
 
-router.post('/tasks/:id/dismiss', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
+router.post('/tasks/:id/retry', (req, res) => {
+  const task = req.task;
+  if (task.status !== 'failed') {
+    return res.status(400).json({ error: `Task is ${task.status}, not failed` });
+  }
 
-  // Kill running agent subprocess if task is mid-planning
-  const proc = state.getProcess(req.params.id);
-  if (proc) {
-    proc.kill('SIGTERM');
+  // Reset to 'proposed' to trigger a fresh planning pass with failure context
+  // Keep plan, lastTestOutput, failureCount, and agentLog so the next planner/executor has context
+  state.updateTask(task.id, {
+    status: 'proposed',
+    commitHash: null,
+    diff: null,
+    branch: null,
+    baseBranch: null,
+    executedBy: null,
+  });
+  broadcast('task:updated', state.getTask(task.id));
+
+  res.json({ message: 'Task reset for retry', taskId: task.id });
+});
+
+router.post('/tasks/:id/dismiss', (req, res) => {
+  const task = req.task;
+  // Kill running agent subprocess if task is mid-planning or mid-execution
+  const handle = state.getProcess(req.params.id);
+  if (handle) {
+    try { handle.proc.kill('SIGTERM'); } catch { /* already dead */ }
+    if (handle.stopPolling) handle.stopPolling();
     state.removeProcess(req.params.id);
   }
 
@@ -237,9 +343,7 @@ router.post('/tasks/:id/dismiss', (req, res) => {
 // --- Diff endpoint ---
 
 router.get('/tasks/:id/diff', async (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   // Return stored diff if available
   if (task.diff) {
     return res.json({ diff: task.diff, source: 'stored' });
@@ -277,9 +381,7 @@ router.get('/tasks/:id/diff', async (req, res) => {
 // --- Log endpoints ---
 
 router.get('/tasks/:id/logs', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const phases = ['generation', 'planning', 'execution', 'judgment'];
   const available = [];
   for (const phase of phases) {
@@ -293,9 +395,7 @@ router.get('/tasks/:id/logs', (req, res) => {
 });
 
 router.get('/tasks/:id/logs/:phase', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const phase = req.params.phase;
   if (!['generation', 'planning', 'execution', 'judgment'].includes(phase)) {
     return res.status(400).json({ error: 'Invalid phase' });
@@ -315,9 +415,7 @@ router.get('/tasks/:id/logs/:phase', (req, res) => {
 // --- Replay Timeline endpoints ---
 
 router.get('/tasks/:id/replay', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const phases = getReplayMeta(task.id);
   const timeline = [];
   for (const phase of phases) {
@@ -342,9 +440,7 @@ router.get('/tasks/:id/replay', (req, res) => {
 });
 
 router.get('/tasks/:id/replay/:phase', (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const phase = req.params.phase;
   if (!['generation', 'planning', 'execution', 'judgment', 'testSetup'].includes(phase)) {
     return res.status(400).json({ error: 'Invalid phase' });
@@ -356,9 +452,7 @@ router.get('/tasks/:id/replay/:phase', (req, res) => {
 });
 
 router.post('/tasks/:id/replay/:phase', async (req, res) => {
-  const task = state.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
+  const task = req.task;
   const phase = req.params.phase;
   const entityId = (phase === 'generation' || phase === 'judgment' || phase === 'testSetup') ? task.projectId : task.id;
   const events = readReplayLog(entityId, phase);
@@ -390,15 +484,77 @@ router.post('/tasks/:id/replay/:phase', async (req, res) => {
   }
 });
 
+// --- Similarity / duplicate resolution endpoints ---
+
+router.get('/tasks/:id/similar', (req, res) => {
+  const task = req.task;
+  const existingTasks = state.getTasks(task.projectId)
+    .filter(t => t.id !== task.id);
+  const similar = findSimilarTasks(task, existingTasks, 0.2);
+  res.json({ taskId: task.id, similar });
+});
+
+router.post('/tasks/:id/resolve-duplicate',
+  validateBody({
+    action: { type: 'string', required: true, enum: ['keep', 'skip', 'merge'] },
+  }),
+  (req, res) => {
+  const { action, mergeIntoTaskId } = req.body;
+  const task = req.task;
+
+  if (action === 'skip') {
+    state.removeTask(task.id);
+    broadcast('task:dismissed', { id: task.id });
+    return res.json({ message: 'Task dismissed as duplicate' });
+  }
+
+  if (action === 'merge' && mergeIntoTaskId) {
+    const target = state.getTask(mergeIntoTaskId);
+    if (!target) return res.status(404).json({ error: 'Merge target not found' });
+    const mergedDesc = target.description + '\n\n---\nMerged from: ' + task.title + '\n' + task.description;
+    const mergedRationale = target.rationale + (task.rationale ? '\n' + task.rationale : '');
+    state.updateTask(target.id, {
+      description: mergedDesc,
+      rationale: mergedRationale,
+    });
+    state.removeTask(task.id);
+    broadcast('task:updated', state.getTask(target.id));
+    broadcast('task:dismissed', { id: task.id });
+    return res.json({ message: 'Tasks merged', mergedInto: target.id });
+  }
+
+  if (action === 'keep') {
+    state.updateTask(task.id, { similarTasks: null });
+    broadcast('task:updated', state.getTask(task.id));
+    return res.json({ message: 'Task kept' });
+  }
+
+  res.status(400).json({ error: 'Invalid action. Use keep, skip, or merge' });
+});
+
+// --- Dependency info endpoint ---
+
+router.get('/tasks/:id/dependencies', (req, res) => {
+  const task = req.task;
+  const dependencies = state.getBlockers(task.id);
+  const dependents = state.getDependents(task.id);
+  const blocked = state.isTaskBlocked(task.id);
+
+  res.json({ dependencies, dependents, blocked });
+});
+
 // --- Batch operations ---
 
-router.post('/tasks/batch', async (req, res) => {
+router.post('/tasks/batch',
+  validateBody({
+    action: { type: 'string', required: true, enum: ['plan', 'execute', 'dismiss'] },
+    taskIds: { type: 'array', required: true },
+  }),
+  async (req, res) => {
   const { action, taskIds, modelId } = req.body;
-  if (!action || !Array.isArray(taskIds)) {
-    return res.status(400).json({ error: 'action and taskIds[] are required' });
-  }
-  if (!['plan', 'execute', 'dismiss'].includes(action)) {
-    return res.status(400).json({ error: 'action must be plan, execute, or dismiss' });
+  const invalidBatchId = taskIds.find(id => !isValidUUID(id));
+  if (invalidBatchId) {
+    return res.status(400).json({ error: `Invalid task ID format: ${invalidBatchId}` });
   }
   if (taskIds.length === 0) {
     return res.json({ message: `Batch ${action}: nothing to do`, count: 0 });
@@ -429,9 +585,11 @@ router.post('/tasks/batch', async (req, res) => {
     }
     runNext();
   } else if (action === 'execute') {
+    const MAX_TASK_FAILURES = 3;
     const validTasks = taskIds
       .map(id => state.getTask(id))
-      .filter(t => t && (t.status === 'planned' || t.status === 'proposed'))
+      .filter(t => t && (t.status === 'planned' || t.status === 'proposed' || t.status === 'failed'))
+      .filter(t => (t.failureCount || 0) < MAX_TASK_FAILURES)
       .sort((a, b) => (a.sortOrder ?? Infinity) - (b.sortOrder ?? Infinity));
     if (validTasks.length === 0) {
       return res.json({ message: 'No tasks to execute', count: 0 });
@@ -439,17 +597,20 @@ router.post('/tasks/batch', async (req, res) => {
 
     let queued = 0;
     let started = 0;
+    let skippedBlocked = 0;
 
     for (const task of validTasks) {
-      // Budget check
-      const project = state.getProject(task.projectId);
-      if (project && project.budgetLimitUsd != null) {
-        const projectTasks = state.getTasks(task.projectId);
-        const totalSpent = projectTasks.reduce((sum, t) => sum + (t.costUsd || 0), 0);
-        if (totalSpent >= project.budgetLimitUsd) continue; // skip over-budget tasks
+      // Skip blocked tasks
+      if (state.isTaskBlocked(task.id)) {
+        skippedBlocked++;
+        continue;
       }
 
-      if (state.isProjectLocked(task.projectId)) {
+      // Budget check
+      const project = state.getProject(task.projectId);
+      if (project && !checkBudget(project).allowed) continue; // skip over-budget tasks
+
+      if (!state.lockProject(task.projectId)) {
         state.updateTask(task.id, { status: 'queued', executedBy: modelId || null });
         const position = state.enqueueTask(task.projectId, task.id);
         broadcast('execution:queued', { taskId: task.id, position, projectId: task.projectId });
@@ -457,12 +618,12 @@ router.post('/tasks/batch', async (req, res) => {
         queued++;
       } else {
         started++;
-        // Fire and forget
-        runExecution(task, modelId).catch(err => console.error('Batch execute failed:', err.message));
+        // Fire and forget — lock already held
+        runExecution(task, modelId, { lockHeld: true }).catch(err => console.error('Batch execute failed:', err.message));
       }
     }
 
-    res.json({ message: 'Batch execution started', count: validTasks.length, started, queued });
+    res.json({ message: 'Batch execution started', count: validTasks.length, started, queued, skippedBlocked });
   } else if (action === 'dismiss') {
     let count = 0;
     for (const id of taskIds) {
@@ -471,8 +632,8 @@ router.post('/tasks/batch', async (req, res) => {
 
       const handle = state.getProcess(id);
       if (handle) {
-        const proc = handle.proc || handle;
-        try { proc.kill('SIGTERM'); } catch { /* already dead */ }
+        try { handle.proc.kill('SIGTERM'); } catch { /* already dead */ }
+        if (handle.stopPolling) handle.stopPolling();
         state.removeProcess(id);
       }
 
@@ -499,11 +660,11 @@ router.post('/tasks/stop-all', async (req, res) => {
     if (!handle) continue;
 
     state.markAborted(taskId);
-    const proc = handle.proc || handle;
-    try { proc.kill('SIGTERM'); } catch { /* already dead */ }
+    if (handle.stopPolling) handle.stopPolling();
+    try { handle.proc.kill('SIGTERM'); } catch { /* already dead */ }
     // SIGKILL fallback
     setTimeout(() => {
-      try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+      try { handle.proc.kill('SIGKILL'); } catch { /* already dead */ }
     }, 5000);
     aborted++;
   }

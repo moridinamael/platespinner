@@ -1,11 +1,13 @@
-import { useState, useEffect, useRef, useMemo, memo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { useConfirm } from '../hooks/useConfirm.js';
 import { api } from '../api.js';
-import { getModelLabel, getModelProvider, formatCost, formatTokens, formatLogSize } from '../utils.js';
+import { getModelLabel, getModelProvider, formatCost, formatTokens, formatLogSize, escapeHtml, sanitizeAnsiHtml } from '../utils.js';
 import DiffViewer from './DiffViewer.jsx';
+import DependencyEditor from './DependencyEditor.jsx';
+import DependencyGraph from './DependencyGraph.jsx';
 import AnsiToHtml from 'ansi-to-html';
 
-const ansiConverter = new AnsiToHtml({ fg: '#959ab0', bg: 'transparent', newline: true });
+const ansiConverter = new AnsiToHtml({ fg: '#959ab0', bg: 'transparent', newline: true, escapeXML: true });
 
 function formatEventType(type) {
   switch (type) {
@@ -17,7 +19,7 @@ function formatEventType(type) {
   }
 }
 
-function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, models, streamingLog, logStreamVersion, replayResult }) {
+function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbort, onDequeue, onUpdateTask, onMerge, onCreatePR, onMergePR, models, streamingLog, logStreamVersion, replayResult, allTasks, blockedTaskIds, onShowToast }) {
   if (!task) return null;
 
   const isProposed = task.status === 'proposed';
@@ -29,7 +31,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const isActive = isExecuting || isPlanning;
 
   // Default model: same as generating model, or first available
-  const defaultModelId = task.generatedBy || (models?.[0]?.id) || 'claude-opus-4-6';
+  const defaultModelId = task.generatedBy || (models?.[0]?.id) || 'claude-opus-4-7';
   const [selectedModelId, setSelectedModelId] = useState(defaultModelId);
   const [confirmingDismiss, armDismiss, resetDismiss] = useConfirm();
   const [mergeStrategy, setMergeStrategy] = useState('merge');
@@ -49,6 +51,10 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const [logLoading, setLogLoading] = useState(false);
   const logContainerRef = useRef(null);
 
+  // Related tasks state
+  const [relatedTasks, setRelatedTasks] = useState(null);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+
   // Timeline/replay state
   const [replayTimeline, setReplayTimeline] = useState(null);
   const [replayLoading, setReplayLoading] = useState(false);
@@ -63,6 +69,12 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const [draftRationale, setDraftRationale] = useState('');
   const [draftEffort, setDraftEffort] = useState('medium');
   const [draftPlan, setDraftPlan] = useState('');
+  const [draftDependencies, setDraftDependencies] = useState([]);
+
+  // Stable toast callback so DependencyEditor's memo is preserved
+  const handleDependencyReject = useCallback((msg) => {
+    if (onShowToast) onShowToast(msg, 'error', 4000);
+  }, [onShowToast]);
 
   // Reset state on task change
   useEffect(() => {
@@ -76,6 +88,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
     setLogMeta([]);
     setSelectedLogPhase(null);
     setLogSearch('');
+    setRelatedTasks(null);
     setReplayTimeline(null);
     setReplayError(null);
     setExpandedEventId(null);
@@ -102,7 +115,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   // Fetch log metadata when Logs tab is selected
   useEffect(() => {
     if (activeTab !== 'logs' || !task) return;
-    api.getTaskLogMeta(task.id).then(setLogMeta).catch(() => setLogMeta([]));
+    api.getTaskLogMeta(task.id).then(setLogMeta).catch(err => { console.warn('Failed to load log metadata:', err); setLogMeta([]); });
   }, [activeTab, task?.id]);
 
   // Auto-select latest available phase
@@ -122,7 +135,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
         setLogContent(text);
         setLogLoading(false);
       })
-      .catch(() => { setLogContent(''); setLogLoading(false); });
+      .catch(err => { console.warn('Failed to load log content:', err); setLogContent(''); setLogLoading(false); });
   }, [selectedLogPhase, task?.id, activeTab, isActive]);
 
   // Fetch replay timeline when Timeline tab is selected
@@ -140,6 +153,19 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
         setReplayLoading(false);
       });
   }, [activeTab, task?.id, replayTimeline]);
+
+  // Fetch related tasks when Related tab is selected
+  useEffect(() => {
+    if (activeTab !== 'related' || !task) return;
+    if (relatedTasks) return;
+    setRelatedLoading(true);
+    api.getSimilarTasks(task.id)
+      .then(data => {
+        setRelatedTasks(data.similar || []);
+        setRelatedLoading(false);
+      })
+      .catch(err => { console.warn('Failed to load related tasks:', err); setRelatedTasks([]); setRelatedLoading(false); });
+  }, [activeTab, task?.id, relatedTasks]);
 
   // Handle incoming replay result from WebSocket
   useEffect(() => {
@@ -172,9 +198,9 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
       ? displayedLog.slice(-512000) + '\n\n... (truncated, showing last 500KB) ...'
       : displayedLog;
     try {
-      return ansiConverter.toHtml(text);
+      return sanitizeAnsiHtml(ansiConverter.toHtml(text));
     } catch {
-      return text;
+      return escapeHtml(text);
     }
   }, [displayedLog]);
 
@@ -206,6 +232,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
     setDraftRationale(task.rationale || '');
     setDraftEffort(task.effort || 'medium');
     setDraftPlan(task.plan || '');
+    setDraftDependencies(task.dependencies || []);
     setEditing(true);
   };
 
@@ -219,6 +246,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
       description: draftDescription,
       rationale: draftRationale,
       effort: draftEffort,
+      dependencies: draftDependencies,
     };
     if (isPlanned && task.plan != null) {
       updates.plan = draftPlan;
@@ -239,6 +267,14 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
   const legacyLabel = !task.generatedBy && !task.executedBy && task.agentType
     ? task.agentType.charAt(0).toUpperCase() + task.agentType.slice(1)
     : null;
+
+  const isBlocked = blockedTaskIds?.has(task.id);
+
+  // Compute dependents: tasks that depend on this task
+  const dependents = useMemo(() => {
+    if (!allTasks || !task) return [];
+    return allTasks.filter(t => t.dependencies && t.dependencies.includes(task.id));
+  }, [allTasks, task]);
 
   // Show tabs when: done (details/changes/logs), or active (details/logs), or any task has logs
   const showTabs = isDone || isActive || isPlanned || isProposed;
@@ -303,6 +339,7 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
             </span>
           )}
           <span className="modal-status">{task.status}</span>
+          {isBlocked && <span className="blocked-badge">Blocked</span>}
           {isDone && task.commitHash && (
             <span className="commit-hash">{task.commitHash.slice(0, 7)}</span>
           )}
@@ -310,7 +347,27 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
             <span className="branch-badge">{task.branch}</span>
           )}
           {isDone && task.prUrl && (
-            <a href={task.prUrl} target="_blank" rel="noopener noreferrer" className="pr-link">PR</a>
+            <a href={task.prUrl} target="_blank" rel="noopener noreferrer" className="pr-link">
+              PR #{task.prNumber || ''}
+            </a>
+          )}
+          {isDone && task.prStatus && task.prStatus.ciStatus && task.prStatus.ciStatus !== 'unknown' && (
+            <span className={`pr-status-badge pr-ci-${task.prStatus.ciStatus}`}>
+              CI: {task.prStatus.ciStatus}
+            </span>
+          )}
+          {isDone && task.prStatus?.reviewDecision && (
+            <span className={`pr-status-badge pr-review-${task.prStatus.reviewDecision.toLowerCase()}`}>
+              {task.prStatus.reviewDecision}
+            </span>
+          )}
+          {isDone && task.prStatus?.mergeable && task.prStatus.mergeable !== 'UNKNOWN' && (
+            <span className={`pr-status-badge pr-mergeable-${task.prStatus.mergeable.toLowerCase()}`}>
+              {task.prStatus.mergeable === 'MERGEABLE' ? 'Mergeable' : 'Conflicts'}
+            </span>
+          )}
+          {isDone && task.merged && (
+            <span className="pr-merged-badge">Merged</span>
           )}
           {task.costUsd > 0 && (
             <span className="cost-badge">{formatCost(task.costUsd)}</span>
@@ -346,6 +403,15 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
             >
               Timeline
             </button>
+            <button
+              className={`modal-tab${activeTab === 'related' ? ' active' : ''}`}
+              onClick={() => setActiveTab('related')}
+            >
+              Related
+              {task.similarTasks?.length > 0 && (
+                <span className="modal-tab-badge">{task.similarTasks.length}</span>
+              )}
+            </button>
           </div>
         )}
 
@@ -380,6 +446,90 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
                 ) : (
                   <p>{task.rationale}</p>
                 )}
+              </div>
+            )}
+
+            {(task.rankingRank != null || task.rankingScore != null || task.rankingReason) && (
+              <div className="modal-section">
+                <h3>Ranking</h3>
+                <div className="ranking-details">
+                  {task.rankingRank != null && (
+                    <div className="ranking-detail-row">
+                      <span className="ranking-detail-label">Position</span>
+                      <span className="ranking-detail-value">#{task.rankingRank}</span>
+                    </div>
+                  )}
+                  {task.rankingScore != null && (
+                    <div className="ranking-detail-row">
+                      <span className="ranking-detail-label">Score</span>
+                      <span className="ranking-detail-value">{task.rankingScore}/10</span>
+                    </div>
+                  )}
+                  {task.rankingReason && (
+                    <div className="ranking-detail-row">
+                      <span className="ranking-detail-label">Reasoning</span>
+                      <span className="ranking-detail-value">{task.rankingReason}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="modal-section">
+              <h3>Dependencies {isBlocked && <span className="blocked-badge">Blocked</span>}</h3>
+              {editing ? (
+                <DependencyEditor
+                  task={task}
+                  allTasks={allTasks || []}
+                  dependencies={draftDependencies}
+                  onChange={setDraftDependencies}
+                  onReject={handleDependencyReject}
+                />
+              ) : (
+                <>
+                  {task.dependencies?.length > 0 ? (
+                    <div className="dependency-list">
+                      {task.dependencies.map(depId => {
+                        const dep = (allTasks || []).find(t => t.id === depId);
+                        return dep ? (
+                          <div key={depId} className={`dependency-item dependency-${dep.status}`}>
+                            <span className={`dependency-status-dot status-${dep.status}`} />
+                            <span className="dependency-title">{dep.title}</span>
+                            <span className="dependency-status">{dep.status}</span>
+                          </div>
+                        ) : (
+                          <div key={depId} className="dependency-item dependency-missing">
+                            <span className="dependency-title">Unknown task ({depId.slice(0,8)})</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-muted">No dependencies</p>
+                  )}
+                  {dependents.length > 0 && (
+                    <div className="dependents-section">
+                      <h4>Depended on by</h4>
+                      {dependents.map(t => (
+                        <div key={t.id} className="dependency-item">
+                          <span className={`dependency-status-dot status-${t.status}`} />
+                          <span className="dependency-title">{t.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Dependency graph for tasks with deps or dependents */}
+            {!editing && ((task.dependencies?.length > 0) || dependents.length > 0) && (
+              <div className="modal-section">
+                <h3>Dependency Graph</h3>
+                <DependencyGraph
+                  tasks={allTasks || []}
+                  focusTaskId={task.id}
+                />
               </div>
             )}
 
@@ -618,6 +768,30 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
           </div>
         )}
 
+        {activeTab === 'related' && (
+          <div className="modal-section modal-related-section">
+            {relatedLoading && <p className="text-muted">Finding related tasks...</p>}
+            {!relatedLoading && relatedTasks && relatedTasks.length === 0 && (
+              <p className="text-muted">No similar tasks found.</p>
+            )}
+            {!relatedLoading && relatedTasks && relatedTasks.length > 0 && (
+              <div className="related-tasks-list">
+                {relatedTasks.map(rt => (
+                  <div key={rt.taskId} className="related-task-item">
+                    <div className="related-task-header">
+                      <span className="related-task-title">{rt.title}</span>
+                      <span className={`related-task-score score-${rt.score >= 0.7 ? 'high' : rt.score >= 0.4 ? 'medium' : 'low'}`}>
+                        {Math.round(rt.score * 100)}% match
+                      </span>
+                      <span className="related-task-status">{rt.status}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {isProposed && (
           <div className="modal-actions">
             {editing ? (
@@ -730,22 +904,45 @@ function CardModal({ task, project, onClose, onExecute, onPlan, onDismiss, onAbo
           </div>
         )}
 
-        {isDone && task.branch && (
+        {isDone && (task.branch || task.prUrl) && (
           <div className="modal-actions">
-            <select
-              className="select model-select"
-              value={mergeStrategy}
-              onChange={(e) => setMergeStrategy(e.target.value)}
-            >
-              <option value="merge">Merge (--no-ff)</option>
-              <option value="squash">Squash & Merge</option>
-            </select>
-            <button className="btn btn-merge" onClick={() => { onMerge?.(task.id, mergeStrategy); onClose(); }}>
-              Merge to Main
-            </button>
-            <button className="btn btn-pr" onClick={() => { onCreatePR?.(task.id); }}>
-              Create PR
-            </button>
+            {!task.prUrl && task.branch && !task.merged && (
+              <>
+                <select
+                  className="select model-select"
+                  value={mergeStrategy}
+                  onChange={(e) => setMergeStrategy(e.target.value)}
+                >
+                  <option value="merge">Merge (--no-ff)</option>
+                  <option value="squash">Squash & Merge</option>
+                </select>
+                <button className="btn btn-merge" onClick={() => { onMerge?.(task.id, mergeStrategy); onClose(); }}>
+                  Merge Locally
+                </button>
+                <button className="btn btn-pr" onClick={() => { onCreatePR?.(task.id); }}>
+                  Create PR
+                </button>
+              </>
+            )}
+            {task.prUrl && !task.merged && (
+              <>
+                <select
+                  className="select model-select"
+                  value={mergeStrategy}
+                  onChange={(e) => setMergeStrategy(e.target.value)}
+                >
+                  <option value="merge">Merge</option>
+                  <option value="squash">Squash</option>
+                  <option value="rebase">Rebase</option>
+                </select>
+                <button className="btn btn-merge" onClick={() => { onMergePR?.(task.id, mergeStrategy); onClose(); }}>
+                  Merge PR
+                </button>
+              </>
+            )}
+            {task.merged && (
+              <span className="pr-merged-badge">PR Merged</span>
+            )}
           </div>
         )}
       </div>
