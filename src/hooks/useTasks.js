@@ -508,7 +508,11 @@ export function useTasks({ selectedProjectId, showToast }) {
         clearProgress(data.taskId);
         setPlanStartTimes((prev) => ({ ...prev, [data.taskId]: Date.now() }));
         setTasks((prev) =>
-          prev.map((t) => (t.id === data.taskId ? { ...t, status: 'planning' } : t))
+          prev.map((t) =>
+            t.id === data.taskId
+              ? { ...t, status: 'planning', plannedBy: data.plannedBy ?? t.plannedBy }
+              : t
+          )
         );
         break;
       case 'planning:progress':
@@ -552,7 +556,11 @@ export function useTasks({ selectedProjectId, showToast }) {
         clearProgress(data.taskId);
         setExecStartTimes((prev) => ({ ...prev, [data.taskId]: Date.now() }));
         setTasks((prev) =>
-          prev.map((t) => (t.id === data.taskId ? { ...t, status: 'executing' } : t))
+          prev.map((t) =>
+            t.id === data.taskId
+              ? { ...t, status: 'executing', executedBy: data.executedBy ?? t.executedBy }
+              : t
+          )
         );
         break;
       case 'execution:progress':

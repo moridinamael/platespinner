@@ -444,8 +444,8 @@ export async function runPlanning(task, modelId) {
   const prompt = buildPlanningPrompt(task);
   const { cmd, args, useStdin } = buildGenerationCommand(modelId, prompt);
 
-  state.updateTask(task.id, { status: 'planning' });
-  broadcast('planning:started', { taskId: task.id });
+  state.updateTask(task.id, { status: 'planning', plannedBy: modelId });
+  broadcast('planning:started', { taskId: task.id, plannedBy: modelId });
   const agentId = registerAgent({ type: 'planning', projectId: project.id, taskId: task.id, modelId });
 
   writeReplayEvent(task.id, 'planning', {
@@ -751,7 +751,7 @@ export async function runExecution(task, modelId, options = {}) {
   const { cmd, args, useStdin } = buildExecutionCommand(modelId, prompt);
 
   state.updateTask(task.id, { status: 'executing', executedBy: modelId });
-  broadcast('execution:started', { taskId: task.id });
+  broadcast('execution:started', { taskId: task.id, executedBy: modelId });
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
 
   // File conflict detection
@@ -1129,7 +1129,7 @@ export async function runExecutionInWorktree(task, modelId, worktreeCwd) {
   const { cmd, args, useStdin } = buildExecutionCommand(modelId, prompt);
 
   state.updateTask(task.id, { status: 'executing', executedBy: modelId });
-  broadcast('execution:started', { taskId: task.id });
+  broadcast('execution:started', { taskId: task.id, executedBy: modelId });
   const agentId = registerAgent({ type: 'executing', projectId: project.id, taskId: task.id, modelId });
 
   // File conflict detection (worktree)
